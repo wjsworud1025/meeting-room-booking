@@ -10,6 +10,8 @@ import {tick} from '../src/server/jobs';
 import {boundaries,syncClaims} from '../src/server/booking';
 import {adminData,snapshot} from '../src/server/queries';
 import {slackSession} from '../src/slack/identity';
+import {ensureSlackMembers} from '../src/slack/members';
+import type {WebClient} from '@slack/web-api';
 import {saveInstallation,workspaceAuthorization,revokeInstallation} from '../src/slack/installations';
 import {commandInput,home,bookingView} from '../src/slack/views';
 import {memberConflicts} from '../src/server/queries';
@@ -37,6 +39,28 @@ function success(r:Awaited<ReturnType<typeof execute>>){assert.equal(r.status,20
 async function accept(id:string,index:number,time=now){const r=await get(id),p=r.participants.find(p=>p.member_id===ids[index])!;return execute(session(ids[index]),'booking.respond',{id:p.id,invitationGeneration:p.invitation_generation,accept:true},randomUUID(),time);}
 let passed=0;async function test(name:string,fn:()=>Promise<void>,count=8){await reset(count);await fn();passed++;console.log('PASS',name);}
 try{
+ await test('Slack / 첫 이용 자동 등록·재요청·차단 계정 보존·외부 사용자 거절',async()=>{
+  const original=process.env.SLACK_WORKSPACE_ID;process.env.SLACK_WORKSPACE_ID='T_NATIVE';
+  const client={users:{info:async({user}:{user:string})=>({ok:true,user:{id:user,team_id:user==='U_OTHER'?'T_OTHER':'T_NATIVE',deleted:false,is_bot:false,profile:{display_name:'Slack 참가자'}}})}} as unknown as Pick<WebClient,'users'>;
+  try{
+   await pool().query('INSERT INTO slack_workspace_classes(team_id,class_name,cohort_id,auto_enroll) VALUES($1,$2,$3,true)',['T_NATIVE','시험 클래스',cohort]);
+   const [a,b]=await Promise.all([ensureSlackMembers(client,'T_NATIVE',['U_NEW']),ensureSlackMembers(client,'T_NATIVE',['U_NEW'])]);assert.equal(a[0],b[0]);
+   const m=(await pool().query('SELECT * FROM members WHERE id=$1',a)).rows[0];assert.equal(m.email,null);assert.equal(m.auth_user_id,null);assert.equal(m.role,'STUDENT');assert.equal(m.class_name,'시험 클래스');
+   assert.equal((await slackSession('T_NATIVE','U_NEW')).memberId,m.id);
+   await pool().query("UPDATE members SET status='INACTIVE' WHERE id=$1",a);await assert.rejects(ensureSlackMembers(client,'T_NATIVE',['U_NEW']));
+   await assert.rejects(ensureSlackMembers(client,'T_NATIVE',['U_OTHER']));
+   await assert.rejects(ensureSlackMembers(client,'T_NATIVE',['U_GOOD','U_OTHER']));assert.equal((await pool().query("SELECT count(*)::int n FROM members WHERE slack_user_id='U_GOOD'")).rows[0].n,0);
+   await pool().query('UPDATE slack_workspace_classes SET auto_enroll=false WHERE team_id=$1',['T_NATIVE']);await assert.rejects(ensureSlackMembers(client,'T_NATIVE',['U_NEXT']));
+  }finally{if(original===undefined)delete process.env.SLACK_WORKSPACE_ID;else process.env.SLACK_WORKSPACE_ID=original;}
+ });
+ await test('클래스 4개 / 공용 회의실 동시 예약은 1개만 확정',async()=>{
+  for(let i=0;i<4;i++){
+   const c=(await pool().query("INSERT INTO cohorts(name,starts_on,ends_on) VALUES($1,'2026-01-01','2026-12-31') RETURNING id",['클래스 '+i])).rows[0];
+   await pool().query('UPDATE members SET cohort_id=$1,class_name=$2 WHERE id=ANY($3::uuid[])',[c.id,'클래스 '+i,[ids[i*2],ids[i*2+1]]]);
+  }
+  const results=await Promise.all([0,1,2,3].map(i=>create(i*2,[i*2+1])));
+  assert.equal(results.filter(r=>r.status===200).length,1);assert.equal(results.filter(r=>r.error?.code==='ROOM_UNAVAILABLE').length,3);
+ });
  await test('Slack / 워크스페이스 토큰 분리·재설치·해제',async()=>{
   const old={team:process.env.SLACK_WORKSPACE_ID,allowed:process.env.SLACK_ALLOWED_WORKSPACE_IDS,key:process.env.SLACK_TOKEN_ENCRYPTION_KEY};
   process.env.SLACK_WORKSPACE_ID='T_DB1';process.env.SLACK_ALLOWED_WORKSPACE_IDS='T_DB2';process.env.SLACK_TOKEN_ENCRYPTION_KEY='22'.repeat(32);

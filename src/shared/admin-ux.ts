@@ -10,7 +10,7 @@ export function policyProblems(rules:Rules){
  return errors;
 }
 export function validPeriod(start:string,end:string){return /^([01]\d|2[0-3]):[0-5]\d$/.test(start)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(end)&&start<end;}
-export function studentImport(csv:string,existing:{email:string;status:string}[]=[]){
+export function studentImport(csv:string,existing:{email:string|null;status:string}[]=[]){
  const rows:{line:number;name:string;email:string;className:string}[]=[],errors:string[]=[],seen=new Set<string>();
  const lines=csv.replace(/^\uFEFF/,'').split(/\r?\n/);let first=true;
  for(let i=0;i<lines.length;i++){
@@ -22,7 +22,7 @@ export function studentImport(csv:string,existing:{email:string;status:string}[]
   if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))errors.push(`${line}행: 이메일 형식을 확인해 주세요.`);
   if(className.length>80)errors.push(`${line}행: 반 이름은 80자 이하로 입력하세요.`);
   if(seen.has(email))errors.push(`${line}행: 중복 이메일입니다 (${email}).`);seen.add(email);
-  if(existing.some(s=>s.email.toLowerCase()===email&&s.status!=='INACTIVE'))errors.push(`${line}행: 이미 등록된 학생 이메일입니다 (${email}).`);
+  if(existing.some(s=>s.email?.toLowerCase()===email&&s.status!=='INACTIVE'))errors.push(`${line}행: 이미 등록된 학생 이메일입니다 (${email}).`);
   rows.push({line,name,email,className});
  }
  if(rows.length>200)errors.push('한 번에 최대 200명까지 등록할 수 있습니다.');

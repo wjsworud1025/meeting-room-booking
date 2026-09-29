@@ -6,6 +6,7 @@ import {isLocal,supabase} from './auth';
 import {member,reservation} from './store';
 import {localDate,localTime} from '../shared/time';
 import {stateLabels,type Member} from '../shared/types';
+import {workspaceAuthorization} from '../slack/installations';
 import {scheduleHolidaySync,syncHolidayTask} from './holidays';
 type Task={id:string;kind:string;recipient_id:string|null;channel:string|null;payload:Record<string,string>;lease_token:string;attempts:number};
 export async function sendMail(to:string,subject:string,text:string){
@@ -20,6 +21,7 @@ async function run(task:Task){
   const db=await pool().connect();let m;try{m=await member(db,task.payload.memberId);}finally{db.release();}
   if(m.role!==task.payload.role||m.role==='ADMIN'&&(m.admin_invite_id!==task.payload.invitationId||m.invite_revoked_at))return;
   if(m.role==='STUDENT'&&m.status!=='REGISTERED'&&m.status!=='PROVISIONING')return;
+  if(!m.email)throw Error('EMAIL_REQUIRED_FOR_PROVISIONING');
   let authId=m.auth_user_id;
   if(!authId){if(isLocal())authId=randomUUID();else{
    const api=supabase(true);const {data,error}=await api.auth.admin.createUser({email:m.email,email_confirm:true});
@@ -40,8 +42,11 @@ async function run(task:Task){
    }if(task.payload.reason)text+='\n'+task.payload.reason;
   }finally{db.release();}
   if(task.channel==='AUTO'&&m.slack_user_id&&!isLocal()){
-   const response=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{Authorization:`Bearer ${process.env.SLACK_BOT_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({channel:m.slack_user_id,text}),signal:AbortSignal.timeout(15000)});const body=await response.json();if(!body.ok)throw Error('SLACK_DELIVERY_FAILED');
-  }else await sendMail(m.email,'[회의실 예약] '+(task.payload.event??'알림'),text);
+   const team=(await pool().query('SELECT slack_workspace_id FROM members WHERE id=$1',[m.id])).rows[0]?.slack_workspace_id;
+   const auth=await workspaceAuthorization(team??'');
+   const response=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{Authorization:`Bearer ${auth.botToken}`,'Content-Type':'application/json'},body:JSON.stringify({channel:m.slack_user_id,text}),signal:AbortSignal.timeout(15000)});const body=await response.json();if(!body.ok)throw Error('SLACK_DELIVERY_FAILED');
+  }else if(m.email)await sendMail(m.email,'[회의실 예약] '+(task.payload.event??'알림'),text);
+  else if(!isLocal())throw Error('NOTIFICATION_DESTINATION_MISSING');
   return;
  }
  throw Error('UNSUPPORTED_TASK_KIND');

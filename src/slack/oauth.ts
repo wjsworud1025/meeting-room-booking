@@ -32,7 +32,7 @@ export function startInstall(req:NextRequest){
  try{
   const cfg=settings(),team=req.nextUrl.searchParams.get('team')??'',state=installState(team);
   const url=new URL('https://slack.com/oauth/v2/authorize');
-  url.search=new URLSearchParams({client_id:cfg.client,scope:'chat:write',redirect_uri:cfg.redirect,state,team}).toString();
+  url.search=new URLSearchParams({client_id:cfg.client,scope:'chat:write,users:read',redirect_uri:cfg.redirect,state,team}).toString();
   const res=NextResponse.redirect(url,303);res.cookies.set(installCookie,state,{...cookieOptions,maxAge:600});Object.entries(headers).forEach(([k,v])=>res.headers.set(k,v));return res;
  }catch(e){return failure(e);}
 }
@@ -45,7 +45,7 @@ export async function finishInstall(req:NextRequest){
   const reply=await fetch('https://slack.com/api/oauth.v2.access',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:cfg.client,client_secret:cfg.secret,code,redirect_uri:cfg.redirect}),signal:AbortSignal.timeout(10000),cache:'no-store'});
   requireThat(reply.ok,'INSTALL_FAILED','Slack 설치 응답을 확인해 주세요.',502);
   const data=installed.parse(await reply.json());
-  requireThat(data.team.id===state.team&&data.app_id===process.env.SLACK_APP_ID&&!data.is_enterprise_install&&!data.expires_in&&data.scope.split(',').includes('chat:write'),'INSTALL_FAILED','선택한 워크스페이스와 앱 설정을 확인해 주세요.',400);
+  requireThat(data.team.id===state.team&&data.app_id===process.env.SLACK_APP_ID&&!data.is_enterprise_install&&!data.expires_in&&['chat:write','users:read'].every(scope=>data.scope.split(',').includes(scope)),'INSTALL_FAILED','선택한 워크스페이스와 앱 설정을 확인해 주세요.',400);
   await saveInstallation({team:data.team.id,name:data.team.name,appId:data.app_id,botUserId:data.bot_user_id,token:data.access_token});
   const url=new URL('https://slack.com/app_redirect');url.search=new URLSearchParams({app:data.app_id,team:data.team.id}).toString();
   res=NextResponse.redirect(url,303);Object.entries(headers).forEach(([k,v])=>res.headers.set(k,v));

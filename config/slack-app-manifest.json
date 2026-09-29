@@ -1,6 +1,6 @@
 {
   "display_information": {"name":"회의실 예약","description":"회의실 예약 조회와 신청","background_color":"#0b7e78"},
   "features": {"bot_user":{"display_name":"회의실 예약","always_online":false},"app_home":{"home_tab_enabled":true,"messages_tab_enabled":false}},
-  "oauth_config":{"scopes":{"bot":["chat:write"]}},
+  "oauth_config":{"scopes":{"bot":["chat:write","users:read"]}},
   "settings":{"event_subscriptions":{"bot_events":["app_home_opened","app_uninstalled"]},"interactivity":{"is_enabled":true},"socket_mode_enabled":true,"org_deploy_enabled":false,"token_rotation_enabled":false}
 }

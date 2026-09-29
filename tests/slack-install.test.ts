@@ -14,7 +14,7 @@ afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();vi.useRealTimers();});
 describe('workspace installation',()=>{
  it('requests only bot scope and binds target workspace with a secure cookie',()=>{
   const res=startInstall(new NextRequest('https://booking.example.com/api/slack/install?team=T2'));
-  const url=new URL(res.headers.get('location')!);expect(url.searchParams.get('scope')).toBe('chat:write');expect(url.searchParams.has('user_scope')).toBe(false);
+  const url=new URL(res.headers.get('location')!);expect(url.searchParams.get('scope')).toBe('chat:write,users:read');expect(url.searchParams.has('user_scope')).toBe(false);
   const cookie=res.cookies.get(installCookie)!;expect(cookie.secure).toBe(true);expect(cookie.httpOnly).toBe(true);expect(verifyInstallState(url.searchParams.get('state')!,cookie.value).team).toBe('T2');
  });
  it('rejects unapproved teams and insecure callback hosts',()=>{
@@ -31,7 +31,7 @@ describe('workspace installation',()=>{
   const parts=a.split('.');parts[1]='A'.repeat(22);expect(()=>decryptToken(parts.join('.'),'T2')).toThrow();
  });
  async function callback(overrides:Record<string,unknown>={}){
-  const state=installState('T2');vi.stubGlobal('fetch',vi.fn().mockResolvedValue(Response.json({ok:true,app_id:'ATEST',token_type:'bot',access_token:'xoxb-new-test',bot_user_id:'UBOT',scope:'chat:write',team:{id:'T2',name:'Test'},...overrides})));
+  const state=installState('T2');vi.stubGlobal('fetch',vi.fn().mockResolvedValue(Response.json({ok:true,app_id:'ATEST',token_type:'bot',access_token:'xoxb-new-test',bot_user_id:'UBOT',scope:'chat:write,users:read',team:{id:'T2',name:'Test'},...overrides})));
   query.mockResolvedValue({rows:[]});
   return finishInstall(new NextRequest('https://booking.example.com/api/slack/install/callback?code=test&state='+state,{headers:{cookie:installCookie+'='+state}}));
  }

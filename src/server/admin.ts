@@ -37,7 +37,7 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
   }
   requireThat(m.status!=='ACTIVE','INVALID_STATE','활성 계정에는 초대 작업을 할 수 없습니다.');
   if(action==='account.revoke'){requireThat(!m.invite_accepted_at&&!m.invite_revoked_at,'ADMIN_INVITATION_INVALID','종료된 초대입니다.');await db.query('UPDATE members SET invite_revoked_at=$2,account_version=account_version+1,updated_at=$2 WHERE id=$1',[m.id,now]);await adminNotice(db,m.id,'관리자 초대 취소',now);return {id:m.id};}
-  return issueAdmin(db,{email:m.email,name:m.display_name,reason:v.reason,issuer:'ADMIN',by:me.id},now);
+  requireThat(m.email,'EMAIL_REQUIRED','관리자 이메일이 필요합니다.');return issueAdmin(db,{email:m.email,name:m.display_name,reason:v.reason,issuer:'ADMIN',by:me.id},now);
  }
  if(action==='student.register'){
   const v=z.object({students:z.array(z.object({name,email,className:z.string().trim().max(80).default('')}).strict()).min(1).max(200),cohortId:uuid,reason}).strict().parse(input);

@@ -27,7 +27,9 @@
     "release:check:production": "tsx --env-file=.env.release.local scripts/release-check.ts",
     "dev:slack": "node scripts/dev-slack.cjs",
     "dev:lan": "node scripts/dev-lan.cjs",
-    "dev:slack-app": "tsx --env-file=.env.slack-app.local src/slack/app.ts"
+    "dev:slack-app": "tsx --env-file=.env.slack-app.local src/slack/app.ts",
+    "dev:slack-install": "tsx --env-file=.env.slack-install.local scripts/slack-install-server.ts",
+    "slack:prepare-class": "tsx --env-file=.env.local scripts/slack-prepare-class.ts"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",

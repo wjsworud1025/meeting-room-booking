@@ -99,3 +99,24 @@ INSERT INTO public.booking_migrations(name) VALUES('003_slack_installations.sql'
 END IF;
 END $slack$;
 COMMIT;
+
+BEGIN;
+SELECT pg_advisory_xact_lock(29092026);
+DO $members$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM public.booking_migrations WHERE name='004_slack_members.sql') THEN
+SET search_path=booking,public;
+ALTER TABLE members ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE members ADD CONSTRAINT members_identity_required CHECK(email IS NOT NULL OR (slack_workspace_id IS NOT NULL AND slack_user_id IS NOT NULL AND role='STUDENT'));
+CREATE TABLE slack_workspace_classes(
+ team_id text PRIMARY KEY,
+ class_name text NOT NULL,
+ cohort_id uuid NOT NULL REFERENCES cohorts,
+ auto_enroll boolean NOT NULL DEFAULT false
+);
+REVOKE ALL ON slack_workspace_classes FROM PUBLIC;
+
+INSERT INTO public.booking_migrations(name) VALUES('004_slack_members.sql');
+END IF;
+END $members$;
+COMMIT;

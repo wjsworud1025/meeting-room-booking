@@ -51,7 +51,7 @@ export async function startSlack(team=process.env.SLACK_WORKSPACE_ID??'',returnT
 export const slackIdentity=z.object({ok:z.literal(true),sub:z.string().min(1),email:z.email(),email_verified:z.literal(true),'https://slack.com/user_id':z.string().min(1),'https://slack.com/team_id':z.string().min(1)});
 export function validateSlackMember(m:(Member&{slack_workspace_id:string|null})|undefined,authId:string,email:string,team:string,userId:string){
  assertWorkspace(team);
- requireThat(m&&(m.role==='STUDENT'||m.role==='ADMIN')&&m.status==='ACTIVE'&&m.auth_user_id===authId&&m.email.toLowerCase()===email.toLowerCase(),'ACCOUNT_DENIED','등록된 활성 계정으로 로그인해 주세요.',403);
+ requireThat(m&&(m.role==='STUDENT'||m.role==='ADMIN')&&m.status==='ACTIVE'&&m.auth_user_id===authId&&m.email?.toLowerCase()===email.toLowerCase(),'ACCOUNT_DENIED','등록된 활성 계정으로 로그인해 주세요.',403);
  requireThat((!m.slack_user_id&&!m.slack_workspace_id)||(m.slack_user_id===userId&&m.slack_workspace_id===team),'ACCOUNT_DENIED','연결된 Slack 계정이 다릅니다. 운영 담당자에게 문의해 주세요.',403);
  return m;
 }
