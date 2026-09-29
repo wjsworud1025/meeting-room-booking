@@ -77,3 +77,25 @@ END IF;
 END $migration_1$;
 COMMIT;
 SELECT name FROM public.booking_migrations ORDER BY name;
+
+BEGIN;
+SELECT pg_advisory_xact_lock(29092026);
+DO $slack$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM public.booking_migrations WHERE name='003_slack_installations.sql') THEN
+SET search_path=booking,public;
+CREATE TABLE slack_installations(
+ team_id text PRIMARY KEY,
+ team_name text NOT NULL,
+ app_id text NOT NULL,
+ bot_user_id text NOT NULL,
+ bot_token_encrypted text NOT NULL,
+ installed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ revoked_at timestamptz
+);
+REVOKE ALL ON slack_installations FROM PUBLIC;
+
+INSERT INTO public.booking_migrations(name) VALUES('003_slack_installations.sql');
+END IF;
+END $slack$;
+COMMIT;

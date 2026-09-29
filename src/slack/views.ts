@@ -9,11 +9,11 @@ export const inputSchema=z.object({date:z.iso.date(),roomId:z.uuid(),time:z.stri
 export type Draft=z.infer<typeof inputSchema>;
 export function commandInput(draft:Draft){const v=inputSchema.parse(draft);return {roomId:v.roomId,startsAt:at(v.date,v.time).toISOString(),endsAt:new Date(at(v.date,v.time).getTime()+v.duration*60000).toISOString(),inviteeIds:[...new Set(v.inviteeIds)]};}
 export function messageView(text:string):ModalView{return {type:'modal',title:plain('회의실 예약'),close:plain('닫기'),blocks:[paragraph(text)]};}
-export function home(data:Snapshot|undefined,base:string,message?:string):HomeView{
+export function home(data:Snapshot|undefined,base:string,message?:string,team?:string):HomeView{
  const blocks:KnownBlock[]=[{type:'header',text:plain('회의실 예약')},paragraph(message??'예약 신청과 내 예약을 Slack에서 확인하세요.')];
  const elements:({type:'button';text:ReturnType<typeof plain>;action_id:string;url?:string})[]=[{type:'button',text:plain('웹 시간표 열기'),action_id:'web',url:base+'/schedule'},{type:'button',text:plain('새로고침'),action_id:'refresh'}];
  if(data?.me.role==='STUDENT')elements.unshift({type:'button',text:plain('예약 신청'),action_id:'new_booking'});
- if(!data)elements.unshift({type:'button',text:plain('계정 연결'),action_id:'web_login',url:base+'/login'});
+ if(!data)elements.unshift({type:'button',text:plain('학생·관리자 계정 연결'),action_id:'web_login',url:base+'/login'+(team?'?slack_team='+encodeURIComponent(team)+'&slack_app=1':'')});
  if(data?.me.role==='ADMIN')elements.unshift({type:'button',text:plain('관리자 웹 열기'),action_id:'web_admin',url:base+'/admin/reservations'});
  blocks.push({type:'actions',elements});
  if(data){const active=data.mine.filter(r=>!['CANCELLED','ENDED'].includes(r.status)).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));blocks.push(paragraph('내 예약 · 초대받아 참여 중인 예약'));

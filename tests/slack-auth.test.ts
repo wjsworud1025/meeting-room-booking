@@ -33,6 +33,11 @@ describe('Slack flow binding',()=>{
 });
 describe('Slack account authorization',()=>{
  it('accepts an existing active student',()=>expect(validateSlackMember(member,'auth-1','student@example.com','T_ALLOWED','U1')).toBe(member));
+ it('accepts an explicitly approved second workspace without opening arbitrary workspaces',()=>{
+  vi.stubEnv('SLACK_ALLOWED_WORKSPACE_IDS','T_SECOND');
+  expect(validateSlackMember(member,'auth-1','student@example.com','T_SECOND','U1')).toBe(member);
+  expect(()=>validateSlackMember(member,'auth-1','student@example.com','T_OTHER','U1')).toThrow();
+ });
  it.each([
   ['wrong workspace',member,'auth-1','student@example.com','T_OTHER','U1'],
   ['unregistered',undefined,'auth-1','student@example.com','T_ALLOWED','U1'],
@@ -44,8 +49,8 @@ describe('Slack account authorization',()=>{
  ] as const)('rejects %s',(_name,m,id,email,team,user)=>expect(()=>validateSlackMember(m as typeof member,id,email,team,user)).toThrow());
 });
 describe('Slack callback with provider and database boundaries',()=>{
- async function callback(team='T_ALLOWED',verified=true,role:'ADMIN'|'STUDENT'='STUDENT'){
-  const start=await startSlack(),cookie=start.cookies.get(slackCookie)!;
+ async function callback(team='T_ALLOWED',verified=true,role:'ADMIN'|'STUDENT'='STUDENT',requestedTeam='T_ALLOWED',returnToApp=false){
+  const start=await startSlack(requestedTeam,returnToApp),cookie=start.cookies.get(slackCookie)!;
   const user={id:'auth-1',aud:'authenticated',role:'authenticated',email:'student@example.com',app_metadata:{},user_metadata:{'https://slack.com/team_id':'T_ALLOWED'},created_at:new Date().toISOString()};
   vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
    const url=String(input);
@@ -61,6 +66,12 @@ describe('Slack callback with provider and database boundaries',()=>{
   const res=await callback();expect(res.headers.get('location')).toBe('https://booking.example.com/schedule');
   const session=unseal(res.cookies.get(cookieName)!.value);expect(session.memberId).toBe('member-1');expect(session.verifiedAt).toBe(0);expect(session.accessToken).toBe('test-access');
   expect(db.query).toHaveBeenCalledWith('COMMIT');expect(res.cookies.get(slackCookie)?.maxAge).toBe(0);
+ });
+ it('binds login to the requested workspace even when both workspaces are approved',async()=>{
+  vi.stubEnv('SLACK_ALLOWED_WORKSPACE_IDS','T_SECOND');const res=await callback('T_SECOND');expect(res.cookies.get(cookieName)).toBeUndefined();expect(db.query).toHaveBeenCalledWith('ROLLBACK');
+ });
+ it('returns an authenticated student to the correct Slack app after linking',async()=>{
+  vi.stubEnv('SLACK_ALLOWED_WORKSPACE_IDS','T_SECOND');vi.stubEnv('SLACK_APP_ID','APP1');const res=await callback('T_SECOND',true,'STUDENT','T_SECOND',true);expect(res.headers.get('location')).toBe('https://slack.com/app_redirect?app=APP1&team=T_SECOND');expect(res.cookies.get(cookieName)).toBeDefined();
  });
  it('routes existing admin to admin UI but requires email reauthentication for sensitive work',async()=>{const res=await callback('T_ALLOWED',true,'ADMIN');expect(res.headers.get('location')).toBe('https://booking.example.com/admin/reservations');const session=unseal(res.cookies.get(cookieName)!.value);expect(()=>admin({...member,role:'ADMIN'},session,new Date(),false)).not.toThrow();expect(()=>admin({...member,role:'ADMIN'},session,new Date(),true)).toThrow('이메일 코드로 다시 인증');});
  it('ignores editable user metadata when Slack returns another workspace',async()=>{const res=await callback('T_OTHER');expect(res.cookies.get(cookieName)).toBeUndefined();expect(db.query).toHaveBeenCalledWith('ROLLBACK');});

@@ -19,7 +19,7 @@ async function handle(req:NextRequest,method:string){try{
   requireThat(origin&&(origin===allowed||(isLocal()&&['http://localhost:3000','http://127.0.0.1:3000'].includes(origin))),'CSRF','요청 출처를 확인할 수 없습니다.',403);
   requireThat((req.headers.get('content-type')??'').startsWith('application/json'),'INVALID_INPUT','JSON 요청이 필요합니다.',415);
   const raw=await req.text();requireThat(raw.length<=100000,'INVALID_INPUT','요청 크기가 너무 큽니다.',413);const body=JSON.parse(raw);
-  if(path==='auth/slack/start'){rateLimit('slack:'+req.headers.get('x-forwarded-for'),30);return await startSlack();}
+  if(path==='auth/slack/start'){rateLimit('slack:'+req.headers.get('x-forwarded-for'),30);const v=z.object({team:z.string().min(1).max(64).optional(),returnToApp:z.boolean().optional()}).strict().parse(body);return await startSlack(v.team,v.returnToApp);}
   if(path==='auth/otp/request'){
    rateLimit('ip:'+req.headers.get('x-forwarded-for'),30);const v=z.object({email}).strict().parse(body);await requestOTP(v.email);return response({message:'등록된 이메일이라면 인증 코드를 보냈습니다.'});
   }

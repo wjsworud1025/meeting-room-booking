@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {readFileSync} from 'node:fs';
+import {readdirSync,readFileSync} from 'node:fs';
 import pg from 'pg';
 import {pool,transaction} from '../src/server/db';
 import {execute} from '../src/server/commands';
@@ -10,6 +10,7 @@ import {tick} from '../src/server/jobs';
 import {boundaries,syncClaims} from '../src/server/booking';
 import {adminData,snapshot} from '../src/server/queries';
 import {slackSession} from '../src/slack/identity';
+import {saveInstallation,workspaceAuthorization,revokeInstallation} from '../src/slack/installations';
 import {commandInput,home,bookingView} from '../src/slack/views';
 import {memberConflicts} from '../src/server/queries';
 import {defaultRules} from '../src/server/policy';
@@ -19,7 +20,7 @@ assert.equal(process.env.APP_ENV,'local','Integration tests only run locally');
 const dbName='booking_test_'+process.pid;
 const base=new URL(process.env.DATABASE_URL!);base.pathname='/postgres';const control=new pg.Client({connectionString:base.toString()});await control.connect();await control.query(`CREATE DATABASE "${dbName}"`);
 const testURL=new URL(process.env.DATABASE_URL!);testURL.pathname='/'+dbName;process.env.DATABASE_URL=testURL.toString();
-const db=await pool().connect();await db.query(readFileSync('db/migrations/001_initial.sql','utf8'));await db.query(readFileSync('db/migrations/002_holidays.sql','utf8'));db.release();
+const db=await pool().connect();for(const file of readdirSync('db/migrations').filter(f=>f.endsWith('.sql')).sort())await db.query(readFileSync('db/migrations/'+file,'utf8'));db.release();
 const now=at('2026-10-06','17:00');let ids:string[]=[],rooms:string[]=[],admins:string[]=[],cohort='';
 const session=(id:string,verifiedAt=now.getTime()):Session=>({memberId:id,accessVersion:1,verifiedAt,expiresAt:now.getTime()+86400000,sessionId:randomUUID()});
 async function reset(count=8){
@@ -36,6 +37,22 @@ function success(r:Awaited<ReturnType<typeof execute>>){assert.equal(r.status,20
 async function accept(id:string,index:number,time=now){const r=await get(id),p=r.participants.find(p=>p.member_id===ids[index])!;return execute(session(ids[index]),'booking.respond',{id:p.id,invitationGeneration:p.invitation_generation,accept:true},randomUUID(),time);}
 let passed=0;async function test(name:string,fn:()=>Promise<void>,count=8){await reset(count);await fn();passed++;console.log('PASS',name);}
 try{
+ await test('Slack / 워크스페이스 토큰 분리·재설치·해제',async()=>{
+  const old={team:process.env.SLACK_WORKSPACE_ID,allowed:process.env.SLACK_ALLOWED_WORKSPACE_IDS,key:process.env.SLACK_TOKEN_ENCRYPTION_KEY};
+  process.env.SLACK_WORKSPACE_ID='T_DB1';process.env.SLACK_ALLOWED_WORKSPACE_IDS='T_DB2';process.env.SLACK_TOKEN_ENCRYPTION_KEY='22'.repeat(32);
+  try{
+   await saveInstallation({team:'T_DB1',name:'First',appId:'A_TEST',botUserId:'U_BOT1',token:'xoxb-test1'});
+   await saveInstallation({team:'T_DB2',name:'Second',appId:'A_TEST',botUserId:'U_BOT2',token:'xoxb-test2'});
+   assert.equal((await workspaceAuthorization('T_DB1')).botToken,'xoxb-test1');assert.equal((await workspaceAuthorization('T_DB2')).botToken,'xoxb-test2');
+   await assert.rejects(workspaceAuthorization('T_OTHER'));
+   const raw=(await pool().query('SELECT bot_token_encrypted FROM slack_installations')).rows;assert.ok(raw.every(r=>!r.bot_token_encrypted.includes('xoxb')));
+   await revokeInstallation('T_DB1');await assert.rejects(workspaceAuthorization('T_DB1'));assert.equal((await workspaceAuthorization('T_DB2')).botToken,'xoxb-test2');
+   await saveInstallation({team:'T_DB1',name:'First',appId:'A_TEST',botUserId:'U_BOT1',token:'xoxb-reinstalled'});assert.equal((await workspaceAuthorization('T_DB1')).botToken,'xoxb-reinstalled');
+  }finally{
+   await pool().query('TRUNCATE slack_installations');
+   for(const [env,value] of [['SLACK_WORKSPACE_ID',old.team],['SLACK_ALLOWED_WORKSPACE_IDS',old.allowed],['SLACK_TOKEN_ENCRYPTION_KEY',old.key]]){if(value===undefined)delete process.env[env!];else process.env[env!]=value;}
+  }
+ });
  await test('Slack / 계정 연결·예약 생성·중복 제출·충돌·휴관·비활성 차단',async()=>{
   const oldTeam=process.env.SLACK_WORKSPACE_ID;process.env.SLACK_WORKSPACE_ID='T_LOCAL_TEST';
   try{
