@@ -1,0 +1,31 @@
+const {chromium,expect}=require('@playwright/test');
+const fs=require('node:fs');
+const base='http://127.0.0.1:3000';
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const context=await browser.newContext({viewport:{width:375,height:812}}),page=await context.newPage(),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(base+'/login');await page.getByLabel('이메일',{exact:true}).fill('haneul@example.com');await page.getByRole('button',{name:'인증 코드 받기'}).click();await page.getByLabel('인증 코드',{exact:true}).waitFor();
+ const inbox=await(await context.request.get(base+'/api/dev/mailbox')).json();await page.getByLabel('인증 코드',{exact:true}).fill(inbox.data.find(m=>m.recipient==='haneul@example.com'&&m.subject.includes('인증 코드')).body.match(/\d{6}/)[0]);await page.getByRole('button',{name:'로그인',exact:true}).click();await page.waitForURL('**/schedule');
+ const {data}=await(await context.request.get(base+'/api/snapshot')).json();const today=new Date(new Date(data.now).getTime()+9*3600000),next=new Date(today);next.setUTCDate(next.getUTCDate()+1);while([0,6].includes(next.getUTCDay()))next.setUTCDate(next.getUTCDate()+1);const date=next.toISOString().slice(0,10);
+ fs.mkdirSync('test-results/ux-after',{recursive:true});
+ await page.getByLabel('예약 날짜',{exact:true}).fill(date);await page.locator('.mobile-rooms .slot-list button:not([disabled])').first().click();
+ await page.getByRole('link',{name:'이 시간으로 신청',exact:true}).click();await page.getByLabel('시작 시간',{exact:true}).selectOption('21:00');
+ await expect(page.getByLabel('이용 시간',{exact:true})).toHaveValue('30');await expect(page.getByLabel('이용 시간',{exact:true}).locator('option:not([disabled])')).toHaveText(['30분']);
+ await page.getByLabel('이름으로 학생 찾기').fill('없는이름검증');await expect(page.getByText('검색 결과가 없습니다. 이름이나 반을 다시 확인해 주세요.')).toBeVisible();await page.getByLabel('이름으로 학생 찾기').fill('');await page.locator('.student-options button').first().click();await expect(page.locator('.booking-form-page .member-row')).toHaveCount(2);
+ await page.getByLabel('회의실',{exact:true}).selectOption(data.rooms[1].id);await expect(page.locator('.booking-form-page .member-row')).toHaveCount(2);await page.getByRole('link',{name:'시간표로 돌아가기',exact:true}).click();await expect(page.getByRole('link',{name:'이 시간으로 신청',exact:true})).toBeVisible();await page.getByRole('link',{name:'이 시간으로 신청',exact:true}).click();
+ await expect(page.getByLabel('회의실',{exact:true})).toHaveValue(data.rooms[1].id);await expect(page.locator('.member-row')).toHaveCount(2);await page.reload();await expect(page.getByLabel('이용 날짜',{exact:true})).toHaveValue(date);await expect(page.getByLabel('시작 시간',{exact:true})).toHaveValue('21:00');await expect(page.locator('.member-row')).toHaveCount(2);
+ await page.goto(`${base}/book?room=${data.rooms[1].id}&date=${date}&time=21:00&duration=120`);await expect(page.getByRole('button',{name:'예약 신청',exact:true})).toBeDisabled();await expect(page.getByText('운영시간 밖입니다.',{exact:true})).toBeVisible();await page.getByLabel('이용 시간',{exact:true}).selectOption('30');
+ // A fixture checks recovery without creating a reservation or disclosing another student's schedule.
+ await page.route('**/api/commands',route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:{code:'MEMBER_TIME_CONFLICT',message:'참여자의 다른 예약과 시간이 겹칩니다. 다른 시간을 선택해 주세요.'}})}));
+ await page.getByRole('button',{name:'예약 신청',exact:true}).click();await expect(page.getByRole('button',{name:'구성원 다시 선택',exact:true})).toBeVisible();await page.getByRole('button',{name:'구성원 다시 선택',exact:true}).click();await expect(page.getByLabel('이름으로 학생 찾기')).toBeFocused();await expect(page.locator('.member-row')).toHaveCount(2);await page.unroute('**/api/commands');
+ await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'test-results/ux-after/form-mobile.png',fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.getByRole('link',{name:'시간표로 돌아가기',exact:true}).click();
+ const far=new Date(today);far.setUTCDate(far.getUTCDate()+10);const farDate=far.toISOString().slice(0,10);
+ let release;const gate=new Promise(resolve=>{release=resolve;});await page.route('**/api/snapshot?date='+farDate,async route=>{await gate;await route.continue();});
+ await page.getByLabel('예약 날짜',{exact:true}).fill(farDate);await expect(page.getByText('선택한 날짜의 예약 정보를 확인하고 있습니다.')).toBeVisible();await expect(page.locator('.mobile-booking')).toHaveCount(0);await expect(page.locator('.mobile-rooms .slot-list button:not([disabled])')).toHaveCount(0);release();
+ await expect(page.getByText(/신청 가능 기간 밖입니다/).first()).toBeVisible();await page.screenshot({path:'test-results/ux-after/outside-window-mobile.png',fullPage:false});await page.getByRole('button',{name:'예약 가능한 날짜로 이동',exact:true}).click();await expect(page.getByLabel('예약 날짜',{exact:true})).toHaveValue(today.toISOString().slice(0,10));
+ await page.goto(base+'/my-reservations');await expect(page.getByRole('button',{name:/예정·이용 중/})).toHaveAttribute('aria-pressed','true');await page.getByRole('button',{name:/지난·취소 예약/}).click();await expect(page.getByRole('button',{name:/지난·취소 예약/})).toHaveAttribute('aria-pressed','true');
+ await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/schedule');await expect(page.getByRole('heading',{name:'전체 시간표',exact:true})).toBeVisible();await page.screenshot({path:'test-results/ux-after/schedule-desktop.png',fullPage:true});
+ await page.getByRole('button',{name:'로그아웃',exact:true}).click();await page.waitForURL('**/login');expect(await page.evaluate(()=>Object.keys(sessionStorage).some(k=>k.startsWith('booking-draft:')))).toBe(false);
+ expect(errors).toEqual([]);console.log('PASS: valid duration, empty search, draft navigation/reload, conflict recovery fixture, stale-date guard, date explanation, reservation tabs, logout cleanup, mobile width. No reservation submitted.');
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

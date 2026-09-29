@@ -1,0 +1,31 @@
+// Read-only walkthrough: login and edit unsent forms; never submits a reservation.
+const {chromium,expect}=require('@playwright/test');
+const fs=require('node:fs');
+const base='http://127.0.0.1:3000';
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
+ await page.goto(base+'/login');await page.getByLabel('이메일',{exact:true}).fill('haneul@example.com');await page.getByRole('button',{name:'인증 코드 받기'}).click();await page.getByLabel('인증 코드',{exact:true}).waitFor();
+ const inbox=await(await context.request.get(base+'/api/dev/mailbox')).json();await page.getByLabel('인증 코드',{exact:true}).fill(inbox.data.find(m=>m.recipient==='haneul@example.com'&&m.subject.includes('인증 코드')).body.match(/\d{6}/)[0]);await page.getByRole('button',{name:'로그인',exact:true}).click();await page.waitForURL('**/schedule');
+ const {data}=await(await context.request.get(base+'/api/snapshot')).json();const date=new Date(new Date(data.now).getTime()+9*3600000+86400000).toISOString().slice(0,10),room=data.rooms[0];
+ fs.mkdirSync('test-results/ux-current',{recursive:true});
+ await page.getByLabel('예약 날짜',{exact:true}).fill(date);await expect(page.locator('.calendar .slot:not([disabled])').first()).toBeVisible();
+ await page.screenshot({path:'test-results/ux-current/schedule-desktop.png',fullPage:true});
+ await page.setViewportSize({width:375,height:812});await page.locator('.mobile-rooms .slot-list button:not([disabled])').first().click();
+ const cta=await page.getByRole('link',{name:'이 시간으로 신청',exact:true}).boundingBox();
+ await page.screenshot({path:'test-results/ux-current/schedule-mobile.png',fullPage:false});
+ await page.goto(`${base}/book?room=${room.id}&date=${date}&time=21:00&duration=30`);const longOption=page.getByLabel('이용 시간',{exact:true}).locator('option[value="120"]:not([disabled])');const canSelectLong=await longOption.count()>0;if(canSelectLong)await page.getByLabel('이용 시간',{exact:true}).selectOption('120');
+ const initiallyDisabled=await page.getByRole('button',{name:'예약 신청',exact:true}).isDisabled();
+ await page.locator('.student-options button').first().click();
+ const durationOptions=await page.locator('.booking-form-page .form-grid select').nth(1).locator('option').allTextContents();
+ const enabledBeyondClosing=canSelectLong&&await page.getByRole('button',{name:'예약 신청',exact:true}).isEnabled();
+ await page.screenshot({path:'test-results/ux-current/form-mobile.png',fullPage:true});
+ await page.getByLabel('이름으로 학생 찾기').fill('일치하지않는학생검증');const emptyMessage=await page.getByText('검색 결과가 없습니다. 이름이나 반을 다시 확인해 주세요.').isVisible();
+ await page.getByRole('link',{name:'시간표로 돌아가기',exact:true}).click();
+ const selectionLost=await page.getByRole('link',{name:'이 시간으로 신청',exact:true}).count()===0;
+ const far=new Date(new Date(data.now).getTime()+9*3600000+10*86400000).toISOString().slice(0,10);await Promise.all([page.waitForResponse(r=>r.url().includes('/api/snapshot?date='+far)&&r.status()===200),page.getByLabel('예약 날짜',{exact:true}).fill(far)]);await page.waitForTimeout(300);
+ await expect(page.locator('.mobile-rooms .slot-list button:not([disabled])')).toHaveCount(0);
+ await page.screenshot({path:'test-results/ux-current/outside-window-mobile.png',fullPage:false});
+ const outOfWindowText=await page.locator('.schedule-main').innerText();
+ const result={viewport:{width:375,height:812},selectedCTAWithinViewport:!!cta&&cta.y>=0&&cta.y+cta.height<=812,initiallyDisabled,durationOptions,enabledBeyondClosing,searchEmptyWithoutMessage:!emptyMessage,selectionLostOnFormBack:selectionLost,outOfWindowAllDisabled:true,outOfWindowReasonVisible:/예약 가능 기간|신청 가능 기간|3일 뒤|기간 밖/.test(outOfWindowText),reservationSubmitted:false};
+ fs.writeFileSync('test-results/ux-current/observations.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

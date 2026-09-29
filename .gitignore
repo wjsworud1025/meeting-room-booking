@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.next-slack/
+.next-lan/
+.env*
+!.env.example
+.local/
+test-results/
+playwright-report/
+*.tsbuildinfo
+next-env.d.ts

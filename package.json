@@ -1,0 +1,62 @@
+{
+  "name": "meeting-room-booking",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:local": "tsx scripts/local-db.ts",
+    "db:migrate": "tsx --env-file=.env.local scripts/migrate.ts",
+    "db:seed": "tsx --env-file=.env.local scripts/seed.ts",
+    "admin:bootstrap": "tsx --env-file=.env.local scripts/admin.ts bootstrap",
+    "admin:recover": "tsx --env-file=.env.local scripts/admin.ts recovery",
+    "test": "vitest run",
+    "test:db": "tsx --env-file=.env.local tests/integration.ts",
+    "test:ui": "node tests/browser.cjs",
+    "test:ui:holidays": "node tests/holiday-browser.cjs",
+    "test:ui:ux": "node tests/ux-browser.cjs",
+    "test:ui:admin": "node tests/admin-ux-browser.cjs",
+    "release:check": "tsx --env-file=.env.local scripts/release-check.ts",
+    "test:api:release": "node tests/release-api.cjs",
+    "test:production:smoke": "node tests/production-smoke.cjs",
+    "release:prepare": "tsx scripts/prepare-release.ts",
+    "release:connections": "tsx --env-file=.env.release.local scripts/check-connections.ts",
+    "release:check:production": "tsx --env-file=.env.release.local scripts/release-check.ts",
+    "dev:slack": "node scripts/dev-slack.cjs",
+    "dev:lan": "node scripts/dev-lan.cjs",
+    "dev:slack-app": "tsx --env-file=.env.slack-app.local src/slack/app.ts"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@supabase/supabase-js": "2.117.2",
+    "fast-xml-parser": "5.11.1",
+    "lucide-react": "^0.577.0",
+    "next": "16.3.6",
+    "nodemailer": "10.0.12",
+    "pg": "^8.16.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^24.10.0",
+    "@types/nodemailer": "^7.0.4",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "embedded-postgres": "17.10.0-beta.17",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "5.0.2"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@17.10.0-beta.17": true,
+    "esbuild@0.28.2": true
+  }
+}
