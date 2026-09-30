@@ -79,6 +79,7 @@ try{
  const roomA=(await ok('commands',a,{name:'admin.room.add',input:{name:'A only',venueId:av.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
  const roomB=(await ok('commands',b,{name:'admin.room.add',input:{name:'B only',venueId:bv.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
  const sa=(await ok('snapshot',a)).data,sb=(await ok('snapshot',b)).data;
+ await ok('commands',a,{name:'admin.policy',input:{effectiveOn:'2099-01-01',rules:{...defaultRules,rooms:{[roomA]:{capacity:4,minimum:2}}}}});
  assert.equal(sa.me.login_id,'hyundai_1st','Sidebar identity must use authenticated login ID, not the legacy member display name');
  assert.deepEqual(sa.rooms.map((r:{id:string})=>r.id),[roomA]);assert.deepEqual(sb.rooms.map((r:{id:string})=>r.id),[roomB]);
  const forbidden=await request('commands',b,{name:'admin.room.rename',input:{id:roomA,name:'stolen',reason:'test'}});assert.ok(forbidden.status>=400);
