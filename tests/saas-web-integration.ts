@@ -71,6 +71,17 @@ try{
  console.log('RUNTIME GUARD PASS: valid roles accepted; excess read, RLS disabled, missing function grant and role membership rejected.');
  assert.throws(()=>pool(),/TENANT_CONTEXT_REQUIRED/);
  const a=(await ok('auth/account/login',undefined,{loginId:'hyundai_1st',password:'initial-test-password'})).response.cookies.get('booking-account')!.value;
+
+ const remembered=await ok('auth/account/login',undefined,{loginId:'hyundai_1st',password:'initial-test-password',remember:true});
+ const rememberedCookie=remembered.response.cookies.get('booking-account')!;
+ assert.equal(rememberedCookie.maxAge,30*86400);
+ assert.equal(rememberedCookie.httpOnly,true);
+ assert.equal((await ok('auth/account/me',rememberedCookie.value)).data.loginId,'hyundai_1st');
+ const rememberedDuration=(await controlPool().query("SELECT extract(epoch FROM (expires_at-created_at))::int seconds FROM identity.sessions WHERE token_hash=$1",[ (await import('node:crypto')).createHash('sha256').update(rememberedCookie.value).digest('hex')])).rows[0].seconds;
+ assert.ok(Math.abs(rememberedDuration-30*86400)<5);
+ await ok('auth/logout',rememberedCookie.value,{});
+ assert.equal((await request('auth/account/me',rememberedCookie.value)).status,401);
+ console.log('REMEMBER PASS: 30-day persistent cookie and server session, account resume endpoint, explicit logout revocation.');
  await ok('auth/account/register',undefined,{loginId:'customer_b',password:'customer-password'});
  const b=(await ok('auth/account/login',undefined,{loginId:'customer_b',password:'customer-password'})).response.cookies.get('booking-account')!.value;
  assert.equal((await request('admin/data',b)).status,403);

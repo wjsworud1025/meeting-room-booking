@@ -11,6 +11,21 @@ export default function AccountLogin({mode='login'}:{mode?:'login'|'register'|'p
  const [pilot,setPilot]=useState(false);
  const [saas,setSaas]=useState<boolean|null>(null),[spaceName,setSpaceName]=useState('');
  useEffect(()=>{api<{saas?:boolean;pilot?:boolean}>('config').then(c=>{setSaas(!!c.saas);setPilot(!!c.pilot);}).catch(()=>setError('설정을 불러오지 못했습니다. 페이지를 새로고침해 주세요.'));},[]);
+
+ useEffect(()=>{
+  if(mode!=='login'||saas===null)return;
+  let live=true;
+  async function resume(){
+   try{
+    const a=await api<{mustChange:boolean;status:string}>('auth/account/me');
+    if(!live)return;
+    if(a.mustChange){router.replace('/account/password');return;}
+    if(saas){const info=await api<{space:{status:string}|null}>('auth/account/space-info');if(live)router.replace(info.space?.status==='ACTIVE'?'/admin/reservations':'/account');}
+    else router.replace(a.status==='ACTIVE'?'/admin/reservations':'/account');
+   }catch{/* Expired or absent session: keep the login form available. */}
+  }
+  resume();return()=>{live=false;};
+ },[mode,saas,router]);
  async function createSpace(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{await api('auth/account/space',{name:spaceName});router.replace('/admin/reservations');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  const [account,setAccount]=useState<{loginId:string;status:string;mustChange:boolean}|null>(null);
  useEffect(()=>{if(mode==='password'||mode==='account')api<NonNullable<typeof account>>('auth/account/me').then(a=>{setAccount(a);if(mode==='account'&&a.mustChange)router.replace('/account/password');}).catch(()=>router.replace('/admin/login'));},[mode,router]);
