@@ -98,8 +98,15 @@ try{
  await assert.rejects(()=>readInstallRequest(new URL(disposable.url).searchParams.get('token')!));
  process.env.APP_BASE_URL='http://localhost:3015';
  console.log('INSTALL DELETE PASS: active request protected, foreign customer denied, revoked request deleted and link invalidated.');
+
+ const unusedVenue=(await ok('commands',a,{name:'admin.venue.add',input:{name:'Unused venue',reason:'test removal'}})).data.id;
+ assert.equal((await request('commands',b,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}})).status,404);
+ await ok('commands',a,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}});
+ assert.equal((await request('commands',a,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}})).status,404);
  const roomA=(await ok('commands',a,{name:'admin.room.add',input:{name:'A only',venueId:av.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
  const roomB=(await ok('commands',b,{name:'admin.room.add',input:{name:'B only',venueId:bv.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
+
+ assert.equal((await request('commands',a,{name:'admin.venue.remove',input:{id:av.data.venues[0].id,reason:'test'}})).status,409);
  const sa=(await ok('snapshot',a)).data,sb=(await ok('snapshot',b)).data;
  await ok('commands',a,{name:'admin.policy',input:{effectiveOn:'2099-01-01',rules:{...defaultRules,rooms:{[roomA]:{capacity:4,minimum:2}}}}});
  assert.equal(sa.me.login_id,'hyundai_1st','Sidebar identity must use authenticated login ID, not the legacy member display name');

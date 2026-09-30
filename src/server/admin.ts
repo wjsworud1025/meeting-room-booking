@@ -33,6 +33,14 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
  admin(me,session,now,action.startsWith('account.'));
  requireThat(!action.startsWith('account.'),'SINGLE_ADMIN_ONLY','단일 관리자 운영으로 관리자 추가·초대·권한 변경을 지원하지 않습니다.',403);
  if(action.startsWith('classInstall.'))return installRequestCommand(db,action.slice(13),input,now);
+
+ if(action==='venue.remove'){
+  const v=z.object({id:uuid,reason}).strict().parse(input);
+  requireThat((await db.query('SELECT id FROM venues WHERE id=$1 FOR UPDATE',[v.id])).rowCount,'NOT_FOUND','수업장을 찾을 수 없습니다.',404);
+  const linked=(await db.query('SELECT EXISTS(SELECT 1 FROM rooms WHERE venue_id=$1) rooms,EXISTS(SELECT 1 FROM cohorts WHERE venue_id=$1) classes,EXISTS(SELECT 1 FROM class_install_requests WHERE venue_id=$1) requests',[v.id])).rows[0];
+  requireThat(!linked.rooms&&!linked.classes&&!linked.requests,'CONFLICT','연결된 회의실·클래스 또는 설치 요청이 있습니다. 수업장을 변경하거나 설치 요청을 삭제한 후 다시 시도해 주세요.');
+  await db.query('DELETE FROM venues WHERE id=$1',[v.id]);return {id:v.id};
+ }
  if(action==='venue.add'||action==='venue.rename'){
   const v=z.object({id:uuid.optional(),name,reason}).strict().parse(input);
   requireThat(!(await db.query('SELECT 1 FROM venues WHERE name=$1 AND ($2::uuid IS NULL OR id<>$2)',[v.name,v.id??null])).rowCount,'CONFLICT','같은 이름의 수업장이 있습니다.');
