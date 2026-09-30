@@ -10,7 +10,7 @@ import {randomUUID} from 'node:crypto';
 import {authenticate,assertLocalRequest,cookieName,isLocal,rateLimit,requestOTP,seal,verifyOTP} from '@/server/auth';
 import {pool} from '@/server/db';
 import {execute} from '@/server/commands';
-import {adminData,snapshot,reservationDetail,memberConflicts} from '@/server/queries';
+import {adminReservationRange,adminData,snapshot,reservationDetail,memberConflicts} from '@/server/queries';
 import {AppError,requireThat} from '@/server/errors';
 import {localDate} from '@/shared/time';
 import {holidayInfo} from '@/server/holidays';
@@ -79,6 +79,7 @@ async function handle(req:NextRequest,method:string){try{
   if(path==='me')return response({id:me.id,display_name:me.display_name,email:me.email,role:me.role,status:me.status,local:isLocal()});
   if(path==='admin/onboarding')return response({id:me.id,email:me.email,name:me.display_name,invitationId:me.admin_invite_id,expiresAt:me.invite_expires_at,accepted:!!me.invite_accepted_at,revoked:!!me.invite_revoked_at});
   if(path==='snapshot'){const date=z.iso.date().parse(req.nextUrl.searchParams.get('date')??localDate());return response(await snapshot(session,date));}
+  if(path==='admin/reservations'){const from=z.iso.date().parse(req.nextUrl.searchParams.get('from')),to=z.iso.date().parse(req.nextUrl.searchParams.get('to'));return response(await adminReservationRange(session,from,to));}
   if(path==='admin/data')return response(await adminData(session,z.enum(['all','reservations','accounts','students','settings','reports','history']).parse(req.nextUrl.searchParams.get('section')??'all')));
   if(path==='holidays'||path==='admin/holidays'){
    if(path==='admin/holidays')requireThat(me.role==='ADMIN','FORBIDDEN','관리자만 확인할 수 있습니다.',403);

@@ -70,3 +70,10 @@ export async function memberConflicts(session:Session,ids:string[],start:string,
    ORDER BY starts_at`,[ids,start,end,now])).rows;
  }finally{db.release();}
 }
+
+export async function adminReservationRange(session:Session,from:string,to:string){
+ requireThat(from<=to&&to<=addDays(from,92),'INVALID_RANGE','시작일 이후 최대 93일 범위로 선택해 주세요.',422);
+ const db=await pool().connect();try{const now=new Date(),me=await actor(db,session,now);admin(me,session,now);
+ return (await reservations(db,'r.starts_at >= $1 AND r.starts_at < $2',[at(from,'00:00'),at(addDays(to,1),'00:00')])).map(r=>redact(projected(r,now),me));
+ }finally{db.release();}
+}

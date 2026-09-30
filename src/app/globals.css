@@ -56,3 +56,5 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{max-width:100%}text
 .local-member-select summary[aria-disabled=true]{cursor:not-allowed;opacity:.6}.local-member-results button small{text-align:right;line-height:1.5}.local-member-results button span{flex-shrink:0}
 @media(max-width:760px){input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px}.account-brand{font-size:18px;margin-bottom:22px}.drawer-actions>button{min-height:44px}.local-member-results button{min-height:44px}}
 .login-card label:has(input[type=checkbox]){display:flex;flex-direction:row;justify-content:flex-start;align-items:center;gap:10px;font-weight:400}.login-card label input[type=checkbox]{margin:0;flex-shrink:0;width:18px;height:18px}
+
+.reservation-range{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:26px 0 12px}.reservation-range .date-field{margin:0;flex:0 1 240px}.range-presets{display:flex;gap:6px;flex-wrap:wrap;align-self:flex-end}.range-presets button{min-height:44px}@media(max-width:760px){.reservation-range{gap:8px}.reservation-range .date-field{flex:1 1 140px}.range-presets{width:100%}}

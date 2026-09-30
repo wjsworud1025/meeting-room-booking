@@ -12,6 +12,7 @@ import {runTask} from '../src/server/jobs';
 import {queue} from '../src/server/store';
 import {inWorkspace} from '../src/server/saas/slack-routing';
 import {execute} from '../src/server/commands';
+import {adminReservationRange} from '../src/server/queries';
 import {localDate,addDays,at} from '../src/shared/time';
 import type {Session} from '../src/shared/types';
 import assert from 'node:assert/strict';
@@ -145,6 +146,12 @@ try{
  assert.equal((await request('reservations/'+bookingB,a)).status,404);
  assert.equal((await request('reservations/'+bookingB,b)).status,200);
  for(const [token,own,other,ownStudents,otherStudents] of [[a,bookingId,bookingB,studentsA,studentsB],[b,bookingB,bookingId,studentsB,studentsA]] as const){
+  const range=(await ok('admin/reservations?from='+addDays(date,-1)+'&to='+date,token)).data;
+  assert.ok(range.some((r:{id:string})=>r.id===own));assert.ok(!range.some((r:{id:string})=>r.id===other));
+  const before=(await ok('admin/reservations?from='+addDays(date,-1)+'&to='+addDays(date,-1),token)).data;
+  assert.ok(!before.some((r:{id:string})=>r.id===own));
+  assert.equal((await request('admin/reservations?from='+date+'&to='+addDays(date,-1),token)).status,422);
+  assert.equal((await request('admin/reservations?from='+date+'&to='+addDays(date,93),token)).status,422);
   const view=(await ok('snapshot?date='+date,token)).data;
   assert.ok(view.reservations.some((r:{id:string})=>r.id===own));
   assert.ok(!view.reservations.some((r:{id:string})=>r.id===other));
@@ -153,6 +160,7 @@ try{
   assert.ok(!JSON.stringify(all).includes(other));
   for(const id of otherStudents)assert.ok(!JSON.stringify(all).includes(id));
  }
+ await assert.rejects(()=>withTenant(tenantA.tenant_id,()=>adminReservationRange(session(studentsA[0]),date,date)),/관리자 권한/);
  // User-supplied customer hints cannot switch the authenticated customer.
  const forged=(await ok('snapshot?date='+date+'&tenant_id='+tenantA.tenant_id,b)).data;
  assert.deepEqual(forged.rooms.map((r:{id:string})=>r.id),[roomB]);
