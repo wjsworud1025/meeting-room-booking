@@ -9,6 +9,10 @@ import {localDate} from '../shared/time';
 import type {Member} from '../shared/types';
 export const holidaySource='https://www.data.go.kr/data/15012690/openapi.do';
 export const holidayKeyReady=()=>!!process.env.HOLIDAY_API_KEY?.trim();
+export function holidayWorkerActive(heartbeat:string|null|undefined,now=Date.now()){
+ const stamp=heartbeat?new Date(heartbeat).getTime():NaN;
+ return Number.isFinite(stamp)&&stamp<=now&&now-stamp<90000;
+}
 export function parseHolidayResponse(raw:string,year:number):Record<string,string>{
  if(raw.length>200000||/<!DOCTYPE|<!ENTITY/i.test(raw))throw Error('HOLIDAY_INVALID_RESPONSE');
  let parsed;
@@ -50,12 +54,15 @@ export async function holidayInfo(year:number,admin=false){const db=await pool()
  const task=admin?(await db.query("SELECT status,attempts,last_error_code,next_run_at FROM tasks WHERE kind='HOLIDAY_SYNC' AND status IN ('PENDING','RUNNING') ORDER BY created_at DESC LIMIT 1")).rows[0]:undefined;
  await db.query('COMMIT');
  const publicData={year,days:result.days,coverage:result.coverage,source:result.source,syncedAt:result.syncedAt};
- return admin?{...result,state,task:task??null,configured:holidayKeyReady(),workerEnabled:process.env.RUN_JOBS==='true'}:publicData;
+ const workerActive=holidayWorkerActive(state?.worker_heartbeat);
+ return admin?{...result,state,task:task??null,configured:holidayKeyReady()||workerActive,workerEnabled:workerActive}:publicData;
  }catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}}
 export async function scheduleHolidaySync(db:DB,now:Date,manual=false){
- if(!holidayKeyReady()){if(manual)requireThat(false,'HOLIDAY_KEY_MISSING','공공데이터포털 인증키를 서버에 설정한 뒤 동기화해 주세요.',422);return {queued:false};}
- if(manual)requireThat(process.env.RUN_JOBS==='true','WORKER_DISABLED','작업 실행 설정을 켠 뒤 다시 시도해 주세요.',503);
+ const localWorker=holidayKeyReady()&&process.env.RUN_JOBS==='true';
+ if(!manual&&!localWorker)return {queued:false};
+ if(!manual)await db.query('UPDATE holiday_sync SET worker_heartbeat=$1 WHERE id=1',[now]);
  const state=(await db.query('SELECT * FROM holiday_sync WHERE id=1 FOR UPDATE')).rows[0];
+ if(manual)requireThat(holidayWorkerActive(state.worker_heartbeat,now.getTime()),'WORKER_DISABLED','공휴일 동기화 서버의 연결을 확인해 주세요.',503);
  if(!manual&&new Date(state.next_run_at)>now)return {queued:false};
  const pending=await db.query("SELECT 1 FROM tasks WHERE kind='HOLIDAY_SYNC' AND status IN ('PENDING','RUNNING')");
  if(pending.rowCount)return {queued:true};

@@ -12,13 +12,13 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();vi.useRealTimers();});
 describe('workspace installation',()=>{
- it('requests only bot scope and binds target workspace with a secure cookie',()=>{
-  const res=startInstall(new NextRequest('https://booking.example.com/api/slack/install?team=T2'));
+ it('requests only bot scope and binds target workspace with a secure cookie',async()=>{
+  const res=await startInstall(new NextRequest('https://booking.example.com/api/slack/install?team=T2'));
   const url=new URL(res.headers.get('location')!);expect(url.searchParams.get('scope')).toBe('chat:write,users:read');expect(url.searchParams.has('user_scope')).toBe(false);
   const cookie=res.cookies.get(installCookie)!;expect(cookie.secure).toBe(true);expect(cookie.httpOnly).toBe(true);expect(verifyInstallState(url.searchParams.get('state')!,cookie.value).team).toBe('T2');
  });
- it('rejects unapproved teams and insecure callback hosts',()=>{
-  expect(startInstall(new NextRequest('https://booking.example.com/api/slack/install?team=OTHER')).status).toBe(403);
+ it('rejects unapproved teams and insecure callback hosts',async()=>{
+  expect((await startInstall(new NextRequest('https://booking.example.com/api/slack/install?team=OTHER'))).status).toBe(403);
   vi.stubEnv('APP_BASE_URL','http://192.168.10.64:3002');expect(()=>installState('T2')).toThrow('HTTPS');
  });
  it('rejects tampered, cross-browser, expired and removed-workspace state',()=>{

@@ -10,17 +10,20 @@ export const nativeInputSchema=inputSchema.extend({inviteeIds:z.array(z.string()
 export type Draft=z.infer<typeof inputSchema>;
 export function commandInput(draft:Draft){const v=inputSchema.parse(draft);return {roomId:v.roomId,startsAt:at(v.date,v.time).toISOString(),endsAt:new Date(at(v.date,v.time).getTime()+v.duration*60000).toISOString(),inviteeIds:[...new Set(v.inviteeIds)]};}
 export function messageView(text:string):ModalView{return {type:'modal',title:plain('회의실 예약'),close:plain('닫기'),blocks:[paragraph(text)]};}
-export function home(data:Snapshot|undefined,base:string,message?:string,team?:string,native=false):HomeView{
- const blocks:KnownBlock[]=[{type:'header',text:plain('회의실 예약')},paragraph(message??'예약 신청과 내 예약을 Slack에서 확인하세요.')];
- const elements:({type:'button';text:ReturnType<typeof plain>;action_id:string;url?:string})[]=[{type:'button',text:plain('웹 시간표 열기'),action_id:'web',url:base+'/schedule'},{type:'button',text:plain('새로고침'),action_id:'refresh'}];
- if(data?.me.role==='STUDENT')elements.unshift({type:'button',text:plain('예약 신청'),action_id:'new_booking'});
- if(!data&&!native)elements.unshift({type:'button',text:plain('학생·관리자 계정 연결'),action_id:'web_login',url:base+'/login'+(team?'?slack_team='+encodeURIComponent(team)+'&slack_app=1':'')});
- if(native){const web=elements.findIndex(e=>e.action_id==='web');if(web>=0)elements.splice(web,1);}
- if(data?.me.role==='ADMIN')elements.unshift({type:'button',text:plain('관리자 웹 열기'),action_id:'web_admin',url:base+'/admin/reservations'});
- blocks.push({type:'actions',elements});
- if(data){const active=data.mine.filter(r=>!['CANCELLED','ENDED'].includes(r.status)).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));blocks.push(paragraph('내 예약 · 초대받아 참여 중인 예약'));
- for(const r of active.slice(0,15))blocks.push(paragraph(`${localDate(r.starts_at)} ${localTime(r.starts_at)}–${localTime(r.ends_at)} · ${data.rooms.find(room=>room.id===r.room_id)?.name??'회의실'}\n${r.organizer_id===data.me.id?'내가 신청':'초대받아 참여'} · ${r.status==='CONFIRMED'?'예약 확정':'인원 확인 중'} · ${r.accepted_count}명`));
- if(!active.length)blocks.push(paragraph('예정된 예약이 없습니다.'));if(active.length>15)blocks.push(paragraph('최근 15건을 표시합니다. 전체 예약은 웹에서 확인하세요.'));}
+export function home(data:Snapshot|undefined,base:string,message?:string,team?:string,native=false,links:Record<string,string>={}):HomeView{
+ const adminLogin:KnownBlock={type:'actions',elements:[{type:'button',text:plain('관리자 로그인'),action_id:'web_admin_login',url:base+'/admin/login'}]};
+ const blocks:KnownBlock[]=[{type:'header',text:plain('회의실 예약')}];
+ if(message)blocks.push(paragraph(message));
+ if(!data){blocks.push(paragraph('Slack에서 다시 열어 주세요.'),{type:'actions',elements:[{type:'button',text:plain('다시 시도'),action_id:'refresh'}]});if(!native)blocks.push({type:'actions',elements:[{type:'button',text:plain('계정 연결'),action_id:'web_login',url:base+'/login'+(team?'?slack_team='+encodeURIComponent(team)+'&slack_app=1':'')}]});blocks.push(adminLogin);return {type:'home',blocks};}
+ blocks.push({type:'actions',elements:[data.me.role==='ADMIN'&&data.me.status==='ACTIVE'&&links['/admin/reservations']?{type:'button',text:plain('관리자 페이지'),action_id:'open_web',url:links['/admin/reservations'],value:links['/admin/reservations']?.split('#')[1]??''}:native?{type:'button',text:plain('회의실 예약하기'),style:'primary',action_id:'open_web',url:links['/schedule'],value:links['/schedule']?.split('#')[1]??''}:{type:'button',text:plain('회의실 예약하기'),style:'primary',action_id:'web_schedule',url:base+'/schedule'},{type:'button',text:plain('새로고침'),action_id:'refresh'}]});
+ blocks.push({type:'divider'},{type:'header',text:plain('내 예약')});
+ const active=data.mine.filter(r=>!['CANCELLED','ENDED'].includes(r.status)).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
+ for(const r of active.slice(0,3)){
+  blocks.push(paragraph(`${localDate(r.starts_at)}  ${localTime(r.starts_at)}–${localTime(r.ends_at)}\n${data.rooms.find(room=>room.id===r.room_id)?.name??'회의실'} · ${r.status==='CONFIRMED'?'확정':'인원 확인 중'} · ${r.accepted_count}명`));
+  blocks.push({type:'actions',elements:[native?{type:'button',text:plain('예약 관리'),action_id:'open_web',url:links['/reservations/'+r.id],value:links['/reservations/'+r.id]?.split('#')[1]??''}:{type:'button',text:plain('예약 관리'),action_id:'web_detail',url:base+'/reservations/'+r.id}]});
+ }
+ if(!active.length)blocks.push(paragraph('예정된 예약이 없습니다.'));
+ blocks.push({type:'divider'},adminLogin);
  return {type:'home',blocks};
 }
 export function bookingView(data:Snapshot,draft?:Draft,error?:string,native=false):ModalView{

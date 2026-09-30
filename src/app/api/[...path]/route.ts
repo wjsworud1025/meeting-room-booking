@@ -1,3 +1,4 @@
+import {adminCandidates} from '@/server/slack-admin';
 import {NextRequest,NextResponse} from 'next/server';
 import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
@@ -9,6 +10,7 @@ import {AppError,requireThat} from '@/server/errors';
 import {localDate} from '@/shared/time';
 import {holidayInfo} from '@/server/holidays';
 import {slackEnabled,startSlack} from '@/server/slack-auth';
+import {searchMembers,resolveSlackMember} from '@/server/member-search';
 export const runtime='nodejs';export const dynamic='force-dynamic';
 const email=z.string().trim().toLowerCase().email().max(254);
 function response(data:unknown,status=200){return NextResponse.json({data,serverTime:new Date().toISOString(),requestId:randomUUID()},{status,headers:{'Cache-Control':'no-store'}});}
@@ -19,7 +21,7 @@ async function handle(req:NextRequest,method:string){try{
   requireThat(origin&&(origin===allowed||(isLocal()&&['http://localhost:3000','http://127.0.0.1:3000'].includes(origin))),'CSRF','요청 출처를 확인할 수 없습니다.',403);
   requireThat((req.headers.get('content-type')??'').startsWith('application/json'),'INVALID_INPUT','JSON 요청이 필요합니다.',415);
   const raw=await req.text();requireThat(raw.length<=100000,'INVALID_INPUT','요청 크기가 너무 큽니다.',413);const body=JSON.parse(raw);
-  if(path==='auth/slack/start'){rateLimit('slack:'+req.headers.get('x-forwarded-for'),30);const v=z.object({team:z.string().min(1).max(64).optional(),returnToApp:z.boolean().optional()}).strict().parse(body);return await startSlack(v.team,v.returnToApp);}
+  if(path==='auth/slack/start'){rateLimit('slack:'+req.headers.get('x-forwarded-for'),30);const v=z.object({team:z.string().min(1).max(64).optional(),returnToApp:z.boolean().optional(),admin:z.boolean().optional()}).strict().parse(body);return await startSlack(v.team,v.returnToApp,v.admin);}
   if(path==='auth/otp/request'){
    rateLimit('ip:'+req.headers.get('x-forwarded-for'),30);const v=z.object({email}).strict().parse(body);await requestOTP(v.email);return response({message:'등록된 이메일이라면 인증 코드를 보냈습니다.'});
   }
@@ -32,6 +34,10 @@ async function handle(req:NextRequest,method:string){try{
    requireThat(new Date(v.end)>new Date(v.start)&&new Date(v.end).getTime()-new Date(v.start).getTime()<=86400000,'INVALID_INPUT','확인할 시간을 선택해 주세요.',422);
    const {session}=await authenticate(req);return response(await memberConflicts(session,v.ids,v.start,v.end));
   }
+  if(path==='members/resolve'){
+   const {session,me}=await authenticate(req);requireThat(me.role==='STUDENT','FORBIDDEN','학생만 이용할 수 있습니다.',403);rateLimit('member-resolve:'+session.memberId,60);
+   const v=z.object({slackId:z.string().regex(/^[UW][A-Z0-9]{5,30}$/)}).strict().parse(body);return response(await resolveSlackMember(session,v.slackId));
+  }
   if(path==='commands'){
    const v=z.object({name:z.string().max(80),input:z.unknown()}).strict().parse(body),{session}=await authenticate(req,v.name==='onboarding.accept');
    const result=await execute(session,v.name,v.input,req.headers.get('idempotency-key')??'');const res=NextResponse.json(result,{status:result.status,headers:{'Cache-Control':'no-store'}});
@@ -42,6 +48,8 @@ async function handle(req:NextRequest,method:string){try{
   if(path==='config')return response({local:isLocal(),slack:slackEnabled()});
   if(path==='dev/mailbox'){assertLocalRequest(req);const rows=await pool().query('SELECT * FROM local_auth.mailbox ORDER BY created_at DESC LIMIT 100');return response(rows.rows);}
   const {session,me}=await authenticate(req,path==='me'||path==='admin/onboarding');
+  if(path==='admin/slack-candidates')return response(await adminCandidates(session,z.string().min(1).max(64).parse(req.nextUrl.searchParams.get('team')),z.string().max(100).parse(req.nextUrl.searchParams.get('q')??'')));
+  if(path==='members/search'){requireThat(me.role==='STUDENT','FORBIDDEN','학생만 이용할 수 있습니다.',403);rateLimit('member-search:'+session.memberId,200);return response(await searchMembers(session,z.string().max(100).parse(req.nextUrl.searchParams.get('q')??'')));}
   if(path==='me')return response({id:me.id,display_name:me.display_name,email:me.email,role:me.role,status:me.status,local:isLocal()});
   if(path==='admin/onboarding')return response({id:me.id,email:me.email,name:me.display_name,invitationId:me.admin_invite_id,expiresAt:me.invite_expires_at,accepted:!!me.invite_accepted_at,revoked:!!me.invite_revoked_at});
   if(path==='snapshot'){const date=z.iso.date().parse(req.nextUrl.searchParams.get('date')??localDate());return response(await snapshot(session,date));}

@@ -90,7 +90,7 @@ try{
    assert.equal(success(await execute(linked,'booking.create',input,key)),id);
    assert.equal((await pool().query('SELECT count(*)::int n FROM reservations')).rows[0].n,1);
    assert.equal((await get(id)).accepted_count,2);
-   const snap=await snapshot(linked,day);assert.ok(JSON.stringify(home(snap,'http://localhost:3002')).includes('new_booking'));assert.ok(JSON.stringify(bookingView(snap,draft)).includes('booking_submit'));
+   const snap=await snapshot(linked,day);assert.ok(JSON.stringify(home(snap,'http://localhost:3002')).includes('web_schedule'));assert.ok(JSON.stringify(bookingView(snap,draft)).includes('booking_submit'));
    const conflict=await execute(linked,'booking.create',{...input,roomId:rooms[1]},randomUUID());assert.equal(conflict.error?.code,'MEMBER_TIME_CONFLICT');assert.ok(conflict.error?.message.includes('학생0'));
    assert.equal((await memberConflicts(linked,[ids[0],ids[1]],input.startsAt,input.endsAt)).length,2);
    assert.equal((await memberConflicts(linked,[ids[0]],input.endsAt,at(day,'19:30').toISOString())).length,0);

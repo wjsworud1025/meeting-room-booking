@@ -1,0 +1,16 @@
+.git/
+.env*
+.local/
+.next/
+.next-lan/
+.next-slack/
+node_modules/
+test-results/
+playwright-report/
+deployment/
+*.png
+*.pdf
+*.docx
+*.html
+*.md
+*.tsbuildinfo

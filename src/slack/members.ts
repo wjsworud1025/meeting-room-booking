@@ -1,10 +1,10 @@
 import type {WebClient} from '@slack/web-api';
 import {pool,transaction} from '../server/db';
 import {requireThat} from '../server/errors';
-import {assertWorkspace} from './workspaces';
+import {assertConnectedWorkspace} from './workspaces';
 
 export async function nativeMembership(team:string){
- assertWorkspace(team);
+ await assertConnectedWorkspace(team);
  return (await pool().query('SELECT w.class_name,w.cohort_id FROM slack_workspace_classes w JOIN cohorts c ON c.id=w.cohort_id WHERE w.team_id=$1 AND w.auto_enroll AND c.inactive_at IS NULL',[team])).rows[0] as {class_name:string;cohort_id:string}|undefined;
 }
 type Profile={id?:string;team_id?:string;deleted?:boolean;is_bot?:boolean;is_app_user?:boolean;is_stranger?:boolean;real_name?:string;name?:string;profile?:{display_name?:string;real_name?:string}};
@@ -12,7 +12,7 @@ export function activeWorkspaceMember(user:Profile|undefined,team:string,id:stri
  requireThat(user?.id===id&&id!=='USLACKBOT'&&user.team_id===team&&user.deleted===false&&user.is_bot===false&&!user.is_app_user&&!user.is_stranger,'ACCOUNT_DENIED','해당 클래스의 활성 구성원만 참여할 수 있습니다.',403);
  return (user.profile?.display_name||user.profile?.real_name||user.real_name||user.name||id).slice(0,100);
 }
-// Resolve only users opening the app or selected for a reservation, never import the whole directory.
+// Validate individual access immediately, independently of the background directory sync.
 export async function ensureSlackMembers(client:Pick<WebClient,'users'>,team:string,ids:string[]){
  const group=await nativeMembership(team);requireThat(group,'WORKSPACE_DENIED','구성원 자동 등록이 활성화되지 않았습니다.',403);
  const unique=[...new Set(ids)];requireThat(unique.length>0&&unique.length<=100,'INVALID_INPUT','참여 인원을 확인해 주세요.',422);

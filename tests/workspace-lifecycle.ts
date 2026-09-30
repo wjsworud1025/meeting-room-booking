@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {pool} from '../src/server/db';
+import {importRoster} from '../src/server/workspace-roster';
+import {adminCommand} from '../src/server/admin';
+import type {Member,Session} from '../src/shared/types';
+assert.equal(process.env.APP_ENV,'local');
+const db=await pool().connect(),now=new Date(),team='TTEST'+randomUUID().replaceAll('-','').slice(0,12).toUpperCase();
+process.env.SLACK_ALLOWED_WORKSPACE_IDS=[process.env.SLACK_ALLOWED_WORKSPACE_IDS,team].filter(Boolean).join(',');
+try{
+ await db.query('BEGIN');await db.query('SELECT id FROM settings WHERE id=1 FOR UPDATE');
+ const admin=(await db.query<Member>("SELECT * FROM members WHERE role='ADMIN' AND status='ACTIVE' LIMIT 1")).rows[0];assert.ok(admin);
+ const session:Session={memberId:admin.id,accessVersion:admin.access_version,verifiedAt:now.getTime(),expiresAt:now.getTime()+60000,sessionId:randomUUID()};
+ const before=(await db.query('SELECT id,status,access_version FROM members ORDER BY id')).rows;
+ await db.query("INSERT INTO slack_installations(team_id,team_name,app_id,bot_user_id,bot_token_encrypted) VALUES($1,'검증 전용','test','test','unused')",[team]);
+ const venue=(await db.query('SELECT id FROM venues LIMIT 1')).rows[0];assert.ok(venue);
+ const result=await adminCommand(db,admin,session,'workspace.register',{teamId:team,name:'검증 기수',venueId:venue.id,reason:'격리 검증'},now) as {id:string};
+ await importRoster(db,team,[{slackId:'UROSTER1',display_name:'전체 등록 검증'},{slackId:'UROSTER2',display_name:'미참여 검증'}],now);
+ assert.equal((await db.query('SELECT count(*)::int AS n FROM members WHERE slack_workspace_id=$1 AND first_booking_at IS NULL',[team])).rows[0].n,2);
+ await db.query("UPDATE members SET status='INACTIVE' WHERE slack_workspace_id=$1 AND slack_user_id='UROSTER1'",[team]);
+ await importRoster(db,team,[{slackId:'UROSTER1',display_name:'이름 갱신'}],now);
+ assert.equal((await db.query("SELECT status FROM members WHERE slack_workspace_id=$1 AND slack_user_id='UROSTER1'",[team])).rows[0].status,'INACTIVE');
+ assert.equal((await db.query("SELECT slack_directory_active FROM members WHERE slack_workspace_id=$1 AND slack_user_id='UROSTER2'",[team])).rows[0].slack_directory_active,false);
+ const student=randomUUID();await db.query("INSERT INTO members(id,email,display_name,role,status,cohort_id,slack_workspace_id,slack_user_id) VALUES($1,NULL,'검증 학생','STUDENT','ACTIVE',$2,$3,'UTEST')",[student,result.id,team]);
+ assert.equal((await db.query('SELECT auto_enroll FROM slack_workspace_classes WHERE team_id=$1',[team])).rows[0].auto_enroll,true);
+ await assert.rejects(()=>adminCommand(db,admin,session,'workspace.end',{teamId:team,cohortId:randomUUID(),reason:'검증'},now),{code:'STALE_VERSION'});
+ await adminCommand(db,admin,session,'workspace.end',{teamId:team,cohortId:result.id,reason:'검증 종료'},now);
+ const state=(await db.query('SELECT status,access_version FROM members WHERE id=$1',[student])).rows[0];assert.equal(state.status,'INACTIVE');assert.equal(state.access_version,2);
+ assert.equal((await db.query('SELECT auto_enroll FROM slack_workspace_classes WHERE team_id=$1',[team])).rows[0].auto_enroll,false);
+ await assert.rejects(()=>adminCommand(db,admin,session,'workspace.register',{teamId:team,name:'재개',venueId:venue.id,reason:'검증'},now),{code:'CONFLICT'});
+ await assert.rejects(()=>adminCommand(db,{...admin,role:'STUDENT'},session,'workspace.end',{teamId:team,cohortId:result.id,reason:'검증'},now),{code:'FORBIDDEN'});
+ assert.deepEqual((await db.query('SELECT id,status,access_version FROM members WHERE slack_workspace_id IS DISTINCT FROM $1 ORDER BY id',[team])).rows,before);
+ await importRoster(db,team,[{slackId:'UAFTEREND',display_name:'등록 금지'}],now);
+ assert.equal((await db.query("SELECT id FROM members WHERE slack_workspace_id=$1 AND slack_user_id='UAFTEREND'",[team])).rowCount,0);
+ console.log('PASS: full roster, inactive account preserved, departed roster excluded, ended cohort not imported; workspace registration, stale request rejection, cohort termination, automatic enrollment block, session invalidation, reactivation denial, admin authorization, other accounts preserved. All test data rolled back.');
+}finally{await db.query('ROLLBACK');db.release();await pool().end();}

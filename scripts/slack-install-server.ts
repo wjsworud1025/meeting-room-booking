@@ -9,7 +9,7 @@ const server=createServer(async(req,res)=>{
  try{
   const url=new URL(address.pathname+address.search,process.env.APP_BASE_URL);
   const request=new NextRequest(url,{headers:{cookie:req.headers.cookie??''}});
-  const response=address.pathname.endsWith('/callback')?await finishInstall(request):startInstall(request);
+  const response=address.pathname.endsWith('/callback')?await finishInstall(request):await startInstall(request);
   res.writeHead(response.status,Object.fromEntries(response.headers.entries()));res.end(await response.text());
  }catch{res.writeHead(500,{'Cache-Control':'no-store'});res.end('Installation unavailable');}
 });

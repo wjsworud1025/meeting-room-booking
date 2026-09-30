@@ -1,0 +1,10 @@
+SET search_path TO booking,public;
+CREATE TABLE venues(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL UNIQUE CHECK(length(trim(name)) BETWEEN 1 AND 80));
+ALTER TABLE rooms ADD COLUMN venue_id uuid REFERENCES venues;
+ALTER TABLE cohorts ADD COLUMN venue_id uuid REFERENCES venues;
+INSERT INTO venues(name) VALUES('기존 수업장');
+UPDATE rooms SET venue_id=(SELECT id FROM venues WHERE name='기존 수업장');
+UPDATE cohorts SET venue_id=(SELECT id FROM venues WHERE name='기존 수업장');
+CREATE INDEX rooms_venue ON rooms(venue_id);
+CREATE INDEX cohorts_venue ON cohorts(venue_id);
+REVOKE ALL ON venues FROM PUBLIC;

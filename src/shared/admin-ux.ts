@@ -1,5 +1,5 @@
 import type {Rules} from './types';
-export const policyFields=[['windowDays','예약 가능 일수',1,30],['slotMinutes','예약 단위 (분)',5,60],['maxMinutes','최대 이용시간 (분)',30,720],['refillMinutes','인원 보충 기한 (분)',1,60],['cooldownMinutes','신규 신청 제한 (분)',1,60],['gapMinutes','같은 모임 간격 (분)',1,1440],['threshold','공통 인원 비율 (%)',0,99]] as const;
+export const policyFields=[['windowDays','예약 가능 일수',1,30],['slotMinutes','예약 단위 (분)',5,60],['maxMinutes','최대 이용시간 (분)',30,720],['refillMinutes','최소 인원 미달 유예시간 (분)',1,60],['cooldownMinutes','신규 신청 제한 (분)',1,60],['gapMinutes','같은 모임 간격 (분)',1,1440],['threshold','공통 인원 비율 (%)',0,99]] as const;
 export function policyProblems(rules:Rules){
  const errors:string[]=[];
  for(const [key,label,min,max] of policyFields)if(!Number.isFinite(rules[key])||rules[key]<min||rules[key]>max||key!=='threshold'&&!Number.isInteger(rules[key]))errors.push(`${label}: ${min}–${max}${key==='threshold'?'':' 사이 정수'}로 입력해 주세요.`);
@@ -30,7 +30,9 @@ export function studentImport(csv:string,existing:{email:string|null;status:stri
  return {rows,errors,students:rows.map(({name,email,className})=>({name,email,className}))};
 }
 export const adminActionLabels:Record<string,string>={
- 'booking.create':'예약 신청','booking.change':'예약 변경','booking.cancel':'예약 취소','booking.invite':'구성원 자동 참여','booking.leave':'본인 참여 취소','reservation.cancel':'예약 자동 취소',
+ 'admin.classInstall.create':'클래스 설치 링크 생성','admin.classInstall.reissue':'클래스 설치 링크 재발급','admin.classInstall.revoke':'클래스 설치 링크 취소',
+ 'admin.room.add':'회의실 추가','admin.room.rename':'회의실 이름 변경','admin.room.remove':'회의실 제거',
+ 'admin.workspace.register':'워크스페이스 등록','admin.workspace.end':'워크스페이스 기수 종료','booking.create':'예약 신청','booking.change':'예약 변경','booking.cancel':'예약 취소','booking.invite':'구성원 자동 참여','booking.leave':'본인 참여 취소','reservation.cancel':'예약 자동 취소',
  'admin.closure':'휴관 적용','admin.exception.open':'예외 개방 등록','admin.exception.remove':'운영 예외 해제','admin.policy':'예약 정책 저장','admin.student.register':'학생 등록','admin.student.deactivate':'학생 비활성화','admin.cohort.end':'기수 종료',
  'admin.account.invite':'관리자 초대','admin.account.resend':'초대 재발송','admin.account.reinvite':'관리자 재초대','admin.account.revoke':'초대 취소','admin.account.deactivate':'관리자 권한 회수','admin.reservation.removeMember':'참여자 제외','admin.report.resolve':'신고 처리','admin.sanction':'학생 안내·제한','admin.sanction.revoke':'학생 제한 해제','admin.holiday.save':'휴일 표시 저장','admin.holiday.reset':'휴일 원본 복원','admin.holiday.sync':'공휴일 동기화 요청','admin.holiday.acknowledge':'휴일 변경 검토 완료',
 };

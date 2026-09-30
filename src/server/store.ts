@@ -12,7 +12,7 @@ export async function actor(db:DB,session:Session,now:Date,allowPending=false){
 }
 export function admin(m:Member,session:Session,now:Date,recent=false){
  requireThat(m.role==='ADMIN'&&m.status==='ACTIVE','FORBIDDEN','관리자 권한이 필요합니다.',403);
- if(recent)requireThat(now.getTime()-session.verifiedAt<600000&&session.verifiedAt<=now.getTime()+30000,'RECENT_AUTH_REQUIRED','이메일 코드로 다시 인증해 주세요.',403);
+ if(recent)requireThat(now.getTime()-session.verifiedAt<600000&&session.verifiedAt<=now.getTime()+30000,'RECENT_AUTH_REQUIRED','Slack으로 다시 본인 확인해 주세요.',403);
 }
 export async function student(db:DB,m:Member,now:Date){
  requireThat(m.role==='STUDENT'&&m.status==='ACTIVE','FORBIDDEN','활성 학생 계정만 이용할 수 있습니다.',403);
@@ -37,6 +37,7 @@ export async function queue(db:DB,kind:string,key:string,payload:unknown,recipie
 }
 export async function notifyReservation(db:DB,r:Reservation,event:string){
  for(const p of r.participants.filter(p=>['ACCEPTED','INVITED'].includes(p.status))){
+  await queue(db,'NOTIFY',`home:${r.id}:${r.version}:${event}:${p.member_id}`,{reservationId:r.id,event},p.member_id,'SLACK_HOME');
   await queue(db,'NOTIFY',`${r.id}:${r.version}:${event}:${p.member_id}`,{reservationId:r.id,version:r.version,event},p.member_id,'AUTO');
  }
 }

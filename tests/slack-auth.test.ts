@@ -49,8 +49,8 @@ describe('Slack account authorization',()=>{
  ] as const)('rejects %s',(_name,m,id,email,team,user)=>expect(()=>validateSlackMember(m as typeof member,id,email,team,user)).toThrow());
 });
 describe('Slack callback with provider and database boundaries',()=>{
- async function callback(team='T_ALLOWED',verified=true,role:'ADMIN'|'STUDENT'='STUDENT',requestedTeam='T_ALLOWED',returnToApp=false){
-  const start=await startSlack(requestedTeam,returnToApp),cookie=start.cookies.get(slackCookie)!;
+ async function callback(team='T_ALLOWED',verified=true,role:'ADMIN'|'STUDENT'='STUDENT',requestedTeam='T_ALLOWED',returnToApp=false,adminFlow=false,unlinked=false){
+  const start=await startSlack(requestedTeam,returnToApp,adminFlow),cookie=start.cookies.get(slackCookie)!;
   const user={id:'auth-1',aud:'authenticated',role:'authenticated',email:'student@example.com',app_metadata:{},user_metadata:{'https://slack.com/team_id':'T_ALLOWED'},created_at:new Date().toISOString()};
   vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
    const url=String(input);
@@ -59,7 +59,7 @@ describe('Slack callback with provider and database boundaries',()=>{
    if(url==='https://slack.com/api/openid.connect.userInfo')return Response.json({ok:true,sub:'U1',email:'student@example.com',email_verified:verified,'https://slack.com/team_id':team,'https://slack.com/user_id':'U1'});
    throw new Error('unexpected provider request');
   }));
-  db.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith('SELECT')?[{...member,role}]:[]}));
+  db.query.mockImplementation(async(sql:string)=>({rows:sql.startsWith('SELECT')?[{...member,role,auth_user_id:unlinked?null:member.auth_user_id}]:[]}));
   return finishSlack(new NextRequest('https://booking.example.com/api/auth/slack/callback?code=test-code',{headers:{cookie:slackCookie+'='+cookie.value}}));
  }
  it('issues existing app session after provider verification and DB commit',async()=>{
@@ -73,7 +73,10 @@ describe('Slack callback with provider and database boundaries',()=>{
  it('returns an authenticated student to the correct Slack app after linking',async()=>{
   vi.stubEnv('SLACK_ALLOWED_WORKSPACE_IDS','T_SECOND');vi.stubEnv('SLACK_APP_ID','APP1');const res=await callback('T_SECOND',true,'STUDENT','T_SECOND',true);expect(res.headers.get('location')).toBe('https://slack.com/app_redirect?app=APP1&team=T_SECOND');expect(res.cookies.get(cookieName)).toBeDefined();
  });
- it('routes existing admin to admin UI but requires email reauthentication for sensitive work',async()=>{const res=await callback('T_ALLOWED',true,'ADMIN');expect(res.headers.get('location')).toBe('https://booking.example.com/admin/reservations');const session=unseal(res.cookies.get(cookieName)!.value);expect(()=>admin({...member,role:'ADMIN'},session,new Date(),false)).not.toThrow();expect(()=>admin({...member,role:'ADMIN'},session,new Date(),true)).toThrow('이메일 코드로 다시 인증');});
+ it('routes existing admin directly and recognizes fresh Slack authentication',async()=>{const res=await callback('T_ALLOWED',true,'ADMIN');expect(res.headers.get('location')).toBe('https://booking.example.com/admin/reservations');const session=unseal(res.cookies.get(cookieName)!.value);expect(()=>admin({...member,role:'ADMIN'},session,new Date(),false)).not.toThrow();expect(()=>admin({...member,role:'ADMIN'},session,new Date(),true)).not.toThrow();expect(session.verifiedAt).toBeGreaterThan(Date.now()-5000);});
+ it('links a pre-registered active administrator on first Slack sign-in without email OTP',async()=>{const res=await callback('T_ALLOWED',true,'ADMIN','T_ALLOWED',false,true,true);expect(res.headers.get('location')).toBe('https://booking.example.com/admin/reservations');expect(res.cookies.get(cookieName)).toBeDefined();expect(db.query).toHaveBeenCalledWith(expect.stringContaining("role='ADMIN'"),['student@example.com']);});
+ it('rejects a student on the administrator login path',async()=>{const res=await callback('T_ALLOWED',true,'STUDENT','T_ALLOWED',false,true);expect(res.cookies.get(cookieName)).toBeUndefined();expect(res.headers.get('location')).toBe('https://booking.example.com/admin/login?slack_error=1');});
+ it('does not bind an unverified email to an administrator',async()=>{const res=await callback('T_ALLOWED',false,'ADMIN','T_ALLOWED',false,true,true);expect(res.cookies.get(cookieName)).toBeUndefined();});
  it('ignores editable user metadata when Slack returns another workspace',async()=>{const res=await callback('T_OTHER');expect(res.cookies.get(cookieName)).toBeUndefined();expect(db.query).toHaveBeenCalledWith('ROLLBACK');});
  it('rejects unverified email before touching the database',async()=>{const res=await callback('T_ALLOWED',false);expect(res.cookies.get(cookieName)).toBeUndefined();expect(db.query).not.toHaveBeenCalled();});
 });

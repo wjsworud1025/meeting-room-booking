@@ -1,7 +1,7 @@
 import type {Snapshot} from './types';
 import {addDays,at,localDate,timeNumber,timeText} from './time';
 
-type Calendar=Pick<Snapshot,'date'|'now'|'rules'|'rooms'|'closed'|'reservations'>;
+type Calendar=Pick<Snapshot,'date'|'now'|'rules'|'rooms'|'closed'|'reservations'|'holiday'>;
 export function dateProblem(data:Calendar,date:string,now=new Date(data.now).getTime()){
  if(data.date!==date)return '선택한 날짜의 예약 정보를 확인하고 있습니다.';
  const today=localDate(new Date(now));
@@ -18,8 +18,8 @@ export function periodProblem(data:Calendar,date:string,roomId:string,time:strin
  if(localDate(end)!==date)return '같은 날짜 안에서 이용 시간을 선택해 주세요.';
  const exceptions=data.closed.filter(e=>e.room_id===null||e.room_id===roomId);
  if(exceptions.some(e=>e.kind==='CLOSED'&&start<at(date,e.local_end)&&end>at(date,e.local_start)))return '휴관 시간입니다.';
- const regular=rules.weekdays.includes(new Date(date+'T00:00:00Z').getUTCDay())&&start>=at(date,rules.open)&&end<=at(date,rules.close);
- if(!regular&&!exceptions.some(e=>e.kind==='OPEN'&&start>=at(date,e.local_start)&&end<=at(date,e.local_end)))return '운영시간 밖입니다.';
+ const regular=!data.holiday&&rules.weekdays.includes(new Date(date+'T00:00:00Z').getUTCDay())&&start>=at(date,rules.open)&&end<=at(date,rules.close);
+ if(!regular&&!exceptions.some(e=>e.kind==='OPEN'&&start>=at(date,e.local_start)&&end<=at(date,e.local_end)))return data.holiday?'공휴일 휴관입니다.':'운영시간 밖입니다.';
  if(data.reservations.some(r=>r.room_id===roomId&&!['CANCELLED','ENDED'].includes(r.status)&&start<new Date(r.ends_at)&&end>new Date(r.starts_at)))return '다른 예약과 겹칩니다.';
  return '';
 }

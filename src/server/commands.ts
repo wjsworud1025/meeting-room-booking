@@ -27,7 +27,7 @@ export async function execute(session:Session,name:string,input:unknown,key:stri
    }else requireThat(false,'INVALID_INPUT','지원하지 않는 요청입니다.',422);
    const record=input&&typeof input==='object'?input as Record<string,unknown>:{};
    const resultId=data&&typeof data==='object'&&'id' in data?String(data.id):null;
-   await audit(db,me.id,name,resultId,String(record.reason??''),now,requestId,{result:data,...(name.startsWith('admin.holiday.')?{input}: {})},me.role==='STUDENT'?me.cohort_id:null);
+   await audit(db,me.id,name,resultId,String(record.reason??''),now,requestId,{result:name.startsWith('admin.classInstall.')?{id:resultId}:data,...(name.startsWith('admin.holiday.')?{input}: {})},me.role==='STUDENT'?me.cohort_id:null);
    result={data,status:200,serverTime:now.toISOString(),requestId};
   }catch(e){
    await db.query('ROLLBACK TO SAVEPOINT command_change');

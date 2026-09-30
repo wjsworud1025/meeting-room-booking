@@ -1,3 +1,5 @@
+import {assertRoomVenue,assertMembersVenue} from './venues';
+import {holidayYear} from './holidays';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import type {DB} from './db';
@@ -21,6 +23,7 @@ export const bookingSchemas={
  transferRespond:z.object({id:uuid,requestId:uuid,accept:z.boolean()}).strict(),
 };
 export async function syncClaims(db:DB,id:string){
+ await db.query("UPDATE members m SET first_booking_at=COALESCE(p.responded_at,r.created_at) FROM reservation_members p JOIN reservations r ON r.id=p.reservation_id WHERE p.reservation_id=$1 AND p.member_id=m.id AND p.status='ACCEPTED' AND m.first_booking_at IS NULL",[id]);
  await db.query('DELETE FROM member_claims WHERE reservation_id=$1',[id]);
  await db.query(`INSERT INTO member_claims(reservation_id,member_id,during) SELECT r.id,p.member_id,tstzrange(r.starts_at,r.ends_at,'[)') FROM reservations r JOIN reservation_members p ON p.reservation_id=r.id WHERE r.id=$1 AND p.status='ACCEPTED' AND r.status IN ('HOLDING','CONFIRMED','REPLENISHING')`,[id]);
 }
@@ -36,7 +39,7 @@ export async function boundaries(db:DB,now:Date){
  const due=await reservations(db,"(r.status='CONFIRMED' AND (r.ends_at<=$1 OR (r.starts_at<=$1 AND r.start_snapshot_at IS NULL))) OR (r.status='HOLDING' AND r.initial_deadline<=$1) OR (r.status='REPLENISHING' AND r.replenish_deadline<=$1)",[now]);
  for(const r of due){
   const deadline=r.status==='HOLDING'?r.initial_deadline:r.status==='REPLENISHING'?r.replenish_deadline:null;
-  if(deadline&&new Date(deadline)<=now){await cancelReservation(db,r,now,'최소 인원 모집 기한 만료',new Date(deadline));continue;}
+  if(deadline&&new Date(deadline)<=now){await cancelReservation(db,r,now,'예약 유지 기한 내 최소 인원 미충족',new Date(deadline));continue;}
   if(r.status==='CONFIRMED'&&new Date(r.starts_at)<=now){
    if(!r.start_snapshot_at){
     const ids=r.participants.filter(p=>p.status==='ACCEPTED').map(p=>p.member_id).sort();
@@ -53,7 +56,7 @@ function organizer(r:Reservation,m:Member){requireThat(r.organizer_id===m.id||m.
 async function checkPeriod(db:DB,roomId:string,start:string,end:string,now:Date,excludeId?:string){
  const p=await policy(db,localDate(start));const rules=p.rules_json;validWindow(start,end,now,rules);
  const room=await db.query('SELECT * FROM rooms WHERE id=$1 AND active',[roomId]);requireThat(room.rowCount&&rules.rooms[roomId],'ROOM_UNAVAILABLE','운영 중인 회의실을 선택해 주세요.');
- const exceptions=await db.query('SELECT * FROM opening_exceptions WHERE local_date=$1',[localDate(start)]);ensureOpen(start,end,roomId,rules,exceptions.rows);
+ const exceptions=await db.query('SELECT * FROM opening_exceptions WHERE local_date=$1',[localDate(start)]);const holidays=await holidayYear(db,Number(localDate(start).slice(0,4)));ensureOpen(start,end,roomId,rules,exceptions.rows,!!holidays.days[localDate(start)]);
  const overlap=await db.query("SELECT 1 FROM reservations WHERE room_id=$1 AND status IN ('HOLDING','CONFIRMED','REPLENISHING') AND starts_at<$3 AND ends_at>$2 AND ($4::uuid IS NULL OR id<>$4)",[roomId,start,end,excludeId??null]);
  requireThat(!overlap.rowCount,'ROOM_UNAVAILABLE','다른 예약이 먼저 확보했습니다. 다른 시간을 선택해 주세요.');
  return p;
@@ -81,9 +84,9 @@ export async function settle(db:DB,id:string,now:Date,validateFair=true){
  }else if(r.first_confirmed_at&&new Date(r.starts_at)>now){
   const p=await policy(db,localDate(r.starts_at));const deadline=r.replenish_deadline?new Date(r.replenish_deadline):new Date(Math.min(now.getTime()+minutes(p.rules_json.refillMinutes),new Date(r.starts_at).getTime()));
   const other=await db.query("SELECT 1 FROM reservations WHERE creator_id=$1 AND id<>$2 AND status IN ('HOLDING','REPLENISHING')",[r.creator_id,id]);
-  if(deadline<=now||other.rowCount){await cancelReservation(db,r,now,'보충 기한 또는 모집 건수 조건 미충족',now);return;}
+  if(deadline<=now||other.rowCount){await cancelReservation(db,r,now,'최소 인원 미달 예약의 유지 조건 미충족',now);return;}
   await db.query("UPDATE reservations SET status='REPLENISHING',replenish_deadline=$2 WHERE id=$1",[id,deadline]);
-  if(r.status!=='REPLENISHING')await notifyReservation(db,await reservation(db,id),'인원 보충 필요');
+  if(r.status!=='REPLENISHING')await notifyReservation(db,await reservation(db,id),'예약 확인 필요: 최소 인원 미달');
  }
  await syncClaims(db,id);
 }
@@ -92,10 +95,11 @@ export async function bookingCommand(db:DB,me:Member,name:string,input:unknown,n
   const v=bookingSchemas.create.parse(input);await student(db,me,now);
   const old=await db.query('SELECT id FROM reservations WHERE creator_id=$1 AND create_request_key=$2',[me.id,key]);requireThat(!old.rowCount,'IDEMPOTENCY_EXPIRED','이미 처리된 신청입니다. 내 예약에서 확인해 주세요.');
   requireThat(!me.cooldown_until||new Date(me.cooldown_until)<=now,'BOOKING_COOLDOWN','신규 신청 제한 중입니다. 잠시 후 다시 신청해 주세요.');
+  await assertRoomVenue(db,me.cohort_id,v.roomId);
   const p=await checkPeriod(db,v.roomId,v.startsAt,v.endsAt,now);const spec=p.rules_json.rooms[v.roomId];
   const ids=[me.id,...v.inviteeIds.map(id=>id.toLowerCase())];requireThat(new Set(ids).size===ids.length&&ids.length<=spec.capacity&&ids.length>=spec.minimum,'CAPACITY_REACHED',`신청자를 포함해 ${spec.minimum}~${spec.capacity}명을 선택해 주세요.`);
-  await eligibility(db,ids,now);await individual(db,ids,v.startsAt,v.endsAt);
-  const holding=await db.query("SELECT 1 FROM reservations WHERE creator_id=$1 AND status IN ('HOLDING','REPLENISHING')",[me.id]);requireThat(!holding.rowCount,'HOLD_LIMIT','모집중인 예약을 먼저 완료해 주세요.');
+  await eligibility(db,ids,now);await assertMembersVenue(db,ids,v.roomId);await individual(db,ids,v.startsAt,v.endsAt);
+  const holding=await db.query("SELECT 1 FROM reservations WHERE creator_id=$1 AND status IN ('HOLDING','REPLENISHING')",[me.id]);requireThat(!holding.rowCount,'HOLD_LIMIT','확인이 필요한 기존 예약을 먼저 처리해 주세요.');
   const id=randomUUID(),deadline=new Date(Math.min(now.getTime()+minutes(p.rules_json.holdMinutes),new Date(v.startsAt).getTime()));
   await db.query("INSERT INTO reservations(id,cohort_id,room_id,creator_id,organizer_id,policy_version_id,capacity_snapshot,minimum_snapshot,starts_at,ends_at,status,initial_deadline,create_request_key,first_confirmed_at,first_confirmed_member_ids) VALUES($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,'CONFIRMED',$10,$11,$12,$13)",[id,me.cohort_id,v.roomId,me.id,p.id,spec.capacity,spec.minimum,v.startsAt,v.endsAt,deadline,key,now,[...ids].sort()]);
   await db.query("INSERT INTO reservation_members(reservation_id,member_id,invited_by,status,responded_at) SELECT $1,mid,$3,'ACCEPTED',$4 FROM unnest($2::uuid[]) AS mid",[id,ids,me.id,now]);
@@ -112,6 +116,7 @@ export async function bookingCommand(db:DB,me:Member,name:string,input:unknown,n
    const accept='accept' in v&&v.accept;
    if(invitation.status===(accept?'ACCEPTED':'DECLINED'))return {id:r.id};
    requireThat(invitation.status==='INVITED','INVITATION_EXPIRED','종료된 초대입니다. 최신 초대를 확인해 주세요.');
+   if(accept)await assertMembersVenue(db,[me.id],r.room_id);
    if(accept)await individual(db,[me.id],r.starts_at,r.ends_at,r.id);
    await db.query('UPDATE reservation_members SET status=$2,responded_at=$3 WHERE id=$1',[v.id,accept?'ACCEPTED':'DECLINED',now]);
    await db.query('UPDATE reservations SET version=version+1 WHERE id=$1',[r.id]);await settle(db,r.id,now);return {id:r.id};
@@ -123,14 +128,14 @@ export async function bookingCommand(db:DB,me:Member,name:string,input:unknown,n
  if(name==='transferRespond'){
   const v=bookingSchemas.transferRespond.parse(input);const r=await reservation(db,v.id);beforeStart(r,now);await student(db,me,now);
   requireThat(r.transfer_request_id===v.requestId&&r.transfer_to_id===me.id&&r.participants.some(p=>p.member_id===me.id&&p.status==='ACCEPTED'),'STALE_VERSION','유효한 책임 이전 요청이 아닙니다.');
-  if(v.accept){const count=await db.query("SELECT 1 FROM reservations WHERE (creator_id=$1 OR organizer_id=$1) AND id<>$2 AND status IN ('HOLDING','REPLENISHING')",[me.id,r.id]);requireThat(!count.rowCount,'HOLD_LIMIT','다른 모집중 예약을 먼저 완료해 주세요.');}
+  if(v.accept){const count=await db.query("SELECT 1 FROM reservations WHERE (creator_id=$1 OR organizer_id=$1) AND id<>$2 AND status IN ('HOLDING','REPLENISHING')",[me.id,r.id]);requireThat(!count.rowCount,'HOLD_LIMIT','확인이 필요한 다른 예약을 먼저 처리해 주세요.');}
   await db.query('UPDATE reservations SET organizer_id=$2,version=version+1,transfer_request_id=NULL,transfer_from_id=NULL,transfer_to_id=NULL,transfer_expires_at=NULL WHERE id=$1',[r.id,v.accept?me.id:r.organizer_id]);await notifyReservation(db,await reservation(db,r.id),'책임 이전 응답');return {id:r.id};
  }
  if(name==='invite'){
   const v=bookingSchemas.invite.parse(input);const r=await reservation(db,v.id);beforeStart(r,now);version(r,v.expectedVersion);await student(db,me,now);
   requireThat(r.participants.some(p=>p.member_id===me.id&&p.status==='ACCEPTED'),'FORBIDDEN','참여자만 초대할 수 있습니다.',403);
   const ids=[...new Set(v.inviteeIds.map(id=>id.toLowerCase()))];requireThat(ids.length===v.inviteeIds.length&&!ids.some(id=>r.participants.some(p=>p.member_id===id&&['INVITED','ACCEPTED'].includes(p.status))),'INVALID_INPUT','이미 참여하거나 초대된 학생입니다.',422);
-  requireThat(r.accepted_count+r.invited_count+ids.length<=r.capacity_snapshot,'CAPACITY_REACHED','회의실 정원을 초과합니다.');await eligibility(db,ids,now);await individual(db,ids,r.starts_at,r.ends_at,r.id);
+  requireThat(r.accepted_count+r.invited_count+ids.length<=r.capacity_snapshot,'CAPACITY_REACHED','회의실 정원을 초과합니다.');await eligibility(db,ids,now);await assertMembersVenue(db,ids,r.room_id);await individual(db,ids,r.starts_at,r.ends_at,r.id);
   await db.query("INSERT INTO reservation_members(reservation_id,member_id,invited_by,status,responded_at) SELECT $1,mid,$3,'ACCEPTED',$4 FROM unnest($2::uuid[]) AS mid ON CONFLICT(reservation_id,member_id) DO UPDATE SET status='ACCEPTED',invited_by=$3,invitation_generation=reservation_members.invitation_generation+1,responded_at=$4",[r.id,ids,me.id,now]);
   await db.query('UPDATE reservations SET version=version+1 WHERE id=$1',[r.id]);await settle(db,r.id,now);await notifyReservation(db,await reservation(db,r.id),'구성원 자동 참여');return {id:r.id};
  }
@@ -144,7 +149,7 @@ export async function bookingCommand(db:DB,me:Member,name:string,input:unknown,n
   requireThat(me.role==='STUDENT'&&r.organizer_id!==me.id,'FORBIDDEN','책임자는 책임을 이전하거나 전체 예약을 취소해 주세요.',403);
   requireThat(r.participants.some(p=>p.member_id===me.id&&p.status==='ACCEPTED'),'FORBIDDEN','본인 참여만 취소할 수 있습니다.',403);
   await db.query("UPDATE reservation_members SET status='LEFT',responded_at=$3 WHERE reservation_id=$1 AND member_id=$2",[r.id,me.id,now]);
-  await db.query('UPDATE reservations SET version=version+1,transfer_request_id=CASE WHEN transfer_to_id=$2 THEN NULL ELSE transfer_request_id END,transfer_to_id=CASE WHEN transfer_to_id=$2 THEN NULL ELSE transfer_to_id END WHERE id=$1',[r.id,me.id]);await settle(db,r.id,now,false);return {id:r.id};
+  await db.query('UPDATE reservations SET version=version+1,transfer_request_id=CASE WHEN transfer_to_id=$2 THEN NULL ELSE transfer_request_id END,transfer_to_id=CASE WHEN transfer_to_id=$2 THEN NULL ELSE transfer_to_id END WHERE id=$1',[r.id,me.id]);await settle(db,r.id,now,false);await notifyReservation(db,{...await reservation(db,r.id),participants:r.participants},'참여 취소');return {id:r.id};
  }
  if(name==='cancel'){
   const v=bookingSchemas.cancel.parse(input),r=await reservation(db,v.id);version(r,v.expectedVersion);organizer(r,me);
@@ -155,6 +160,7 @@ export async function bookingCommand(db:DB,me:Member,name:string,input:unknown,n
  if(name==='change'){
   const v=bookingSchemas.change.parse(input),r=await reservation(db,v.id);beforeStart(r,now);version(r,v.expectedVersion);organizer(r,me);
   if(me.role==='ADMIN')requireThat(v.reason,'INVALID_INPUT','처리 사유를 입력해 주세요.',422);
+  await assertRoomVenue(db,r.cohort_id,v.roomId);await assertMembersVenue(db,r.participants.filter(p=>p.status==='ACCEPTED'||p.status==='INVITED').map(p=>p.member_id),v.roomId);
   const p=await checkPeriod(db,v.roomId,v.startsAt,v.endsAt,now,r.id),spec=p.rules_json.rooms[v.roomId];
   requireThat(r.accepted_count+r.invited_count<=spec.capacity,'CAPACITY_REACHED','선택한 회의실의 정원을 초과합니다.');
   requireThat(r.status!=='CONFIRMED'||r.accepted_count>=spec.minimum,'MINIMUM_NOT_MET','선택한 회의실의 최소 인원이 부족합니다.');

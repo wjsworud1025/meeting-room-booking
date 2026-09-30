@@ -1,0 +1,6 @@
+import {it,expect,vi} from 'vitest';
+import {holidayWorkerActive,scheduleHolidaySync} from '../src/server/holidays';
+import type {DB} from '../src/server/db';
+it('accepts only fresh worker heartbeats',()=>{const now=Date.now();expect(holidayWorkerActive(new Date(now-2000).toISOString(),now)).toBe(true);for(const stamp of [null,'bad',new Date(now-90000).toISOString(),new Date(now+1).toISOString()])expect(holidayWorkerActive(stamp,now)).toBe(false);});
+it('allows a web-only server to use an active remote worker',async()=>{const now=new Date();vi.stubEnv('RUN_JOBS','false');vi.stubEnv('HOLIDAY_API_KEY','');const query=vi.fn().mockResolvedValueOnce({rows:[{worker_heartbeat:now.toISOString(),last_attempt_at:null}]}).mockResolvedValueOnce({rowCount:1});try{expect(await scheduleHolidaySync({query} as unknown as DB,now,true)).toEqual({queued:true});}finally{vi.unstubAllEnvs();}});
+it('rejects manual requests if the worker has stopped',async()=>{const now=new Date();const query=vi.fn().mockResolvedValue({rows:[{worker_heartbeat:new Date(now.getTime()-120000).toISOString()}]});await expect(scheduleHolidaySync({query} as unknown as DB,now,true)).rejects.toMatchObject({code:'WORKER_DISABLED'});});

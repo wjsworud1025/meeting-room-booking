@@ -12,11 +12,11 @@ export function validWindow(start:string,end:string,now:Date,rules:Rules){
  requireThat(length>0&&length<=rules.maxMinutes&&length%rules.slotMinutes===0&&timeNumber(localTime(s))%rules.slotMinutes===0&&s.getUTCSeconds()===0&&s.getUTCMilliseconds()===0&&e.getUTCSeconds()===0&&e.getUTCMilliseconds()===0,'INVALID_INPUT',`${rules.slotMinutes}분 단위, 최대 ${rules.maxMinutes}분으로 선택해 주세요.`,422);
  requireThat(localDate(e)===day,'OUTSIDE_OPENING_HOURS','운영 날짜 안에서 이용 시간을 선택해 주세요.');
 }
-export function ensureOpen(start:string,end:string,roomId:string,rules:Rules,exceptions:{room_id:string|null;kind:string;local_start:string;local_end:string}[]){
+export function ensureOpen(start:string,end:string,roomId:string,rules:Rules,exceptions:{room_id:string|null;kind:string;local_start:string;local_end:string}[],holiday=false){
  const date=localDate(start),s=new Date(start),e=new Date(end),weekday=new Date(date+'T00:00:00Z').getUTCDay();
  const matching=exceptions.filter(x=>x.room_id===null||x.room_id===roomId);
  requireThat(!matching.some(x=>x.kind==='CLOSED'&&s<at(date,x.local_end)&&e>at(date,x.local_start)),'OUTSIDE_OPENING_HOURS','휴관 시간입니다. 다른 시간을 선택해 주세요.');
- const open=(rules.weekdays.includes(weekday)&&s>=at(date,rules.open)&&e<=at(date,rules.close))||matching.some(x=>x.kind==='OPEN'&&s>=at(date,x.local_start)&&e<=at(date,x.local_end));
+ const open=(!holiday&&rules.weekdays.includes(weekday)&&s>=at(date,rules.open)&&e<=at(date,rules.close))||matching.some(x=>x.kind==='OPEN'&&s>=at(date,x.local_start)&&e<=at(date,x.local_end));
  requireThat(open,'OUTSIDE_OPENING_HOURS','운영시간 안에서 이용 시간을 선택해 주세요.');
 }
 export function rosterSets(r:Reservation,now:Date):string[][]{
