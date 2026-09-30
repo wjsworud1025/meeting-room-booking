@@ -55,4 +55,4 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{max-width:100%}text
 .drawer-actions{flex-wrap:wrap}.drawer-body{scroll-padding-block:20px}.drawer input,.drawer select,.drawer textarea,.drawer button{scroll-margin-block:20px}
 .local-member-select summary[aria-disabled=true]{cursor:not-allowed;opacity:.6}.local-member-results button small{text-align:right;line-height:1.5}.local-member-results button span{flex-shrink:0}
 @media(max-width:760px){input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px}.account-brand{font-size:18px;margin-bottom:22px}.drawer-actions>button{min-height:44px}.local-member-results button{min-height:44px}}
-.login-card label:has(input[type=checkbox]){display:flex;align-items:center;gap:10px;font-weight:400}.login-card label input[type=checkbox]{margin:0;flex-shrink:0;width:18px;height:18px}
+.login-card label:has(input[type=checkbox]){display:flex;flex-direction:row;justify-content:flex-start;align-items:center;gap:10px;font-weight:400}.login-card label input[type=checkbox]{margin:0;flex-shrink:0;width:18px;height:18px}
