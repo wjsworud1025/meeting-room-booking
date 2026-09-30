@@ -4,7 +4,7 @@ import {allowedWorkspaces} from '../slack/workspaces';
 import {holidayYear} from './holidays';
 import type {Session,Snapshot,Reservation} from '../shared/types';
 import {localDate,addDays,at} from '../shared/time';
-import {pool} from './db';
+import {pool,saasEnabled} from './db';
 import {actor,admin,policy,redact,reservations,reservation} from './store';
 import {isLocal} from './auth';
 function projected(r:Reservation,now:Date){

@@ -1,6 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {z} from 'zod';
-import {pool,transaction,type DB} from './db';
+import {pool,transaction,saasEnabled,controlPool,type DB} from './db';
 import {requireThat} from './errors';
 import {requireVenue} from './venues';
 import {encryptToken} from '../slack/installations';
@@ -22,12 +22,15 @@ export async function installRequestCommand(db:DB,action:string,input:unknown,no
  const base=new URL(process.env.APP_BASE_URL!);requireThat(base.protocol==='https:','CONFIGURATION','HTTPS 서비스 주소가 필요합니다.',503);
  return {id,url:base.origin+'/class-install?token='+token,expiresAt:expires.toISOString()};
 }
-export async function readInstallRequest(token:string,db:Pick<DB,'query'>=pool(),lock=false){
+export async function readInstallRequest(token:string,db?:Pick<DB,'query'>,lock=false){
  requireThat(/^[A-Za-z0-9_-]{43}$/.test(token),'INVALID_FLOW','유효하지 않은 설치 링크입니다.',400);
+ if(saasEnabled()&&!db){const r=(await controlPool().query('SELECT * FROM saas_control.install_preview($1)',[tokenHash(token)])).rows[0];requireThat(r,'INVALID_FLOW','만료되었거나 사용된 설치 링크입니다.',400);return r;}
+ db??=pool();
  const r=(await db.query(`SELECT r.*,v.name AS venue_name FROM class_install_requests r JOIN venues v ON v.id=r.venue_id WHERE token_hash=$1 ${lock?'FOR UPDATE OF r':''}`,[tokenHash(token)])).rows[0];
  requireThat(r&&!r.revoked_at&&!r.completed_at&&new Date(r.expires_at).getTime()>Date.now(),'INVALID_FLOW','만료되었거나 사용된 설치 링크입니다. 관리자에게 새 링크를 요청하세요.',400);return r;
 }
 export async function connectInstallRequest(token:string,data:{team:string;name:string;appId:string;botUserId:string;token:string}){
+ if(saasEnabled()){await controlPool().query('SELECT saas_control.connect_install($1,$2,$3,$4,$5,$6)',[tokenHash(token),data.team,data.name,data.appId,data.botUserId,encryptToken(data.token,data.team)]);return;}
  return transaction(async(db,now)=>{
   const r=await readInstallRequest(token,db,true);
   requireThat(!(await db.query('SELECT 1 FROM slack_workspace_classes WHERE team_id=$1',[data.team])).rowCount,'CONFLICT','이미 다른 클래스에 연결된 워크스페이스입니다.');

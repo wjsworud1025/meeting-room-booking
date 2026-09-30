@@ -1,3 +1,4 @@
+import {saasEnabled} from './db';
 import type {DB} from './db';
 import type {Member,Reservation,Rules,Session} from '../shared/types';
 import {requireThat} from './errors';
@@ -33,7 +34,7 @@ export async function audit(db:DB,actorId:string|null,action:string,id:string|nu
  await db.query('INSERT INTO audit_events(actor_id,action,entity_type,entity_id,reason,decided_at,request_id,after_summary,cohort_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[actorId,action,action.split('.')[0],id,reason,now,requestId,JSON.stringify(after),cohortId]);
 }
 export async function queue(db:DB,kind:string,key:string,payload:unknown,recipient:string|null=null,channel:string|null=null){
- await db.query('INSERT INTO tasks(kind,dedupe_key,payload,recipient_id,channel) VALUES($1,$2,$3,$4,$5) ON CONFLICT(dedupe_key) DO NOTHING',[kind,key,JSON.stringify(payload),recipient,channel]);
+ await db.query(`INSERT INTO tasks(kind,dedupe_key,payload,recipient_id,channel) VALUES($1,$2,$3,$4,$5) ON CONFLICT(${saasEnabled()?'tenant_id,':''}dedupe_key) DO NOTHING`,[kind,key,JSON.stringify(payload),recipient,channel]);
 }
 export async function notifyReservation(db:DB,r:Reservation,event:string){
  for(const p of r.participants.filter(p=>['ACCEPTED','INVITED'].includes(p.status))){

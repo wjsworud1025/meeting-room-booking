@@ -1,7 +1,7 @@
 import {it,expect,vi,beforeEach} from 'vitest';
 import {createWebLink,activateWebLink,redeemWebLink,slackWebBase,webDestination,verifySlackWebSession} from '../src/server/slack-web';
 const {query,info,membership,authorization}=vi.hoisted(()=>({query:vi.fn(),info:vi.fn(),membership:vi.fn(),authorization:vi.fn()}));
-vi.mock('../src/server/db',()=>({pool:()=>({query})}));
+vi.mock('../src/server/db',()=>({saasEnabled:()=>false,pool:()=>({query})}));
 vi.mock('../src/slack/installations',()=>({workspaceAuthorization:authorization}));
 vi.mock('../src/slack/members',()=>({nativeMembership:membership,activeWorkspaceMember:(u:{deleted:boolean})=>{if(u.deleted)throw Error('inactive');}}));
 vi.mock('@slack/web-api',()=>({WebClient:class{users={info};}}));

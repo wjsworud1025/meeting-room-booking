@@ -6,7 +6,7 @@ import {admin} from '../src/server/store';
 import type {Member} from '../src/shared/types';
 
 const db=vi.hoisted(()=>({query:vi.fn(),release:vi.fn()}));
-vi.mock('../src/server/db',()=>({pool:()=>({connect:async()=>db})}));
+vi.mock('../src/server/db',()=>({saasEnabled:()=>false,pool:()=>({connect:async()=>db})}));
 const member={id:'member-1',auth_user_id:'auth-1',email:'student@example.com',role:'STUDENT',status:'ACTIVE',access_version:3,slack_user_id:null,slack_workspace_id:null} as Member&{slack_workspace_id:string|null};
 beforeEach(()=>{
  vi.stubEnv('SESSION_SECRET','test-secret-with-at-least-32-characters');vi.stubEnv('APP_ENV','production');

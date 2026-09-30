@@ -1,8 +1,10 @@
+import {inWorkspace} from './saas/slack-routing';
+import {assertDeliveryAllowed,tickTenantJobs} from './saas/worker';
 import {WebClient} from '@slack/web-api';
 import {publish} from '../slack/publish-home';
 import {randomUUID} from 'node:crypto';
 import nodemailer from 'nodemailer';
-import {pool,transaction} from './db';
+import {pool,transaction,saasEnabled} from './db';
 import {boundaries} from './booking';
 import {isLocal,supabase} from './auth';
 import {member,reservation} from './store';
@@ -11,7 +13,7 @@ import {stateLabels,type Member} from '../shared/types';
 import {workspaceAuthorization} from '../slack/installations';
 import {scheduleHolidaySync,syncHolidayTask} from './holidays';
 import {syncWorkspaceRosters} from './workspace-roster';
-type Task={id:string;kind:string;recipient_id:string|null;channel:string|null;payload:Record<string,string>;lease_token:string;attempts:number};
+export type Task={tenant_id?:string;id:string;kind:string;recipient_id:string|null;channel:string|null;payload:Record<string,string>;lease_token:string;attempts:number};
 export async function sendMail(to:string,subject:string,text:string){
  if(isLocal()){await pool().query('INSERT INTO local_auth.mailbox(recipient,subject,body) VALUES($1,$2,$3)',[to,subject,text]);return;}
  if(!process.env.SMTP_HOST||!process.env.SMTP_FROM)throw Error('SMTP_NOT_CONFIGURED');
@@ -19,6 +21,7 @@ export async function sendMail(to:string,subject:string,text:string){
  await transport.sendMail({from:process.env.SMTP_FROM,to,subject,text});
 }
 export async function runTask(task:Task){
+ if(saasEnabled()){if(task.kind!=='NOTIFY')throw Error('SAAS_LEGACY_TASK_FORBIDDEN');await assertDeliveryAllowed(task);}
  if(task.channel==='SLACK_ADMIN_INVITE')return;
  if(task.kind==='HOLIDAY_SYNC'){await syncHolidayTask(task);return;}
  if(task.kind==='MEMBER_PROVISION'){
@@ -41,7 +44,7 @@ export async function runTask(task:Task){
    m=await member(db,task.recipient_id);
    if(m.role==='ADMIN'&&m.admin_slack_user)m={...m,slack_user_id:m.admin_slack_user};
    if(task.channel==='SLACK_HOME'){
-    if(m.slack_user_id&&(m.status==='ACTIVE'||m.role==='ADMIN')&&!isLocal()){const team=(await db.query('SELECT COALESCE(admin_slack_team,slack_workspace_id) slack_workspace_id FROM members WHERE id=$1',[m.id])).rows[0]?.slack_workspace_id;const auth=await workspaceAuthorization(team??'');await publish(new WebClient(auth.botToken,{timeout:10000,retryConfig:{retries:0}}),team,m.slack_user_id,m.status==='ACTIVE');}return;
+    if(m.slack_user_id&&(m.status==='ACTIVE'||m.role==='ADMIN')&&!isLocal()){const team=(await db.query('SELECT COALESCE(admin_slack_team,slack_workspace_id) slack_workspace_id FROM members WHERE id=$1',[m.id])).rows[0]?.slack_workspace_id;const auth=await workspaceAuthorization(team??'');await publish(new WebClient(auth.botToken,{timeout:10000,retryConfig:{retries:0}}),team,m.slack_user_id,m.status==='ACTIVE',saasEnabled()?()=>assertDeliveryAllowed(task):undefined);}return;
    }
    if(task.payload.invitationId&&(m.admin_invite_id!==task.payload.invitationId||m.invite_revoked_at||m.invite_accepted_at))return;
    if(task.channel==='SLACK_ADMIN_INVITE'&&(!m.invite_expires_at||new Date(m.invite_expires_at)<=new Date()))return;
@@ -55,14 +58,16 @@ export async function runTask(task:Task){
    const team=(await pool().query('SELECT COALESCE(admin_slack_team,slack_workspace_id) slack_workspace_id FROM members WHERE id=$1',[m.id])).rows[0]?.slack_workspace_id;
    const auth=await workspaceAuthorization(team??'');
    const invite=false;
+   if(saasEnabled()){await inWorkspace(team,async()=>{});await assertDeliveryAllowed(task);}
    const response=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{Authorization:`Bearer ${auth.botToken}`,'Content-Type':'application/json'},body:JSON.stringify({channel:m.slack_user_id,text,unfurl_links:false,unfurl_media:false,blocks:[{type:'section',text:{type:'plain_text',text:text.slice(0,2900)}},...(invite?[{type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'관리자 초대 수락'},style:'primary',action_id:'admin_invite_accept',value:task.payload.invitationId},{type:'button',text:{type:'plain_text',text:'거절'},action_id:'admin_invite_decline',value:task.payload.invitationId}]}]:process.env.SLACK_APP_ID?[{type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'내 예약 확인'},action_id:'web_notification_home',url:'https://slack.com/app_redirect?'+new URLSearchParams({app:process.env.SLACK_APP_ID,team,tab:'home'}).toString()}]}]:[])]}),signal:AbortSignal.timeout(15000)});const body=await response.json();if(!body.ok)throw Error('SLACK_'+String(body.error??'DELIVERY_FAILED').replace(/[^a-z_]/gi,'').toUpperCase());return {slackAccepted:true,channel:body.channel,ts:body.ts};
-  }else if(m.email)await sendMail(m.email,'[회의실 예약] '+(task.payload.event??'알림'),text);
+  }else if(m.email){if(saasEnabled()){if(task.kind!=='NOTIFY')throw Error('SAAS_LEGACY_TASK_FORBIDDEN');await assertDeliveryAllowed(task);}await sendMail(m.email,'[회의실 예약] '+(task.payload.event??'알림'),text);}
   else if(!isLocal())throw Error('NOTIFICATION_DESTINATION_MISSING');
   return;
  }
  throw Error('UNSUPPORTED_TASK_KIND');
 }
 export async function tick(){
+ if(saasEnabled())return tickTenantJobs();
  void syncWorkspaceRosters().catch(()=>console.error('booking.roster: scheduling failed'));
  await transaction(async(db,now)=>{await boundaries(db,now);await db.query('UPDATE settings SET job_heartbeat=$1 WHERE id=1',[now]);await db.query('DELETE FROM command_receipts WHERE expires_at<$1',[now]);await scheduleHolidaySync(db,now);});
  for(let i=0;i<5;i++){

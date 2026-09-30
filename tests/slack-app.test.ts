@@ -2,7 +2,7 @@ import {describe,it,expect,vi,beforeEach} from 'vitest';
 import {commandInput,inputSchema,home,bookingView} from '../src/slack/views';
 import {slackSession} from '../src/slack/identity';
 import type {Snapshot} from '../src/shared/types';
-const {query}=vi.hoisted(()=>({query:vi.fn()}));vi.mock('../src/server/db',()=>({pool:()=>({query})}));
+const {query}=vi.hoisted(()=>({query:vi.fn()}));vi.mock('../src/server/db',()=>({saasEnabled:()=>false,pool:()=>({query})}));
 const room='f9008aed-efbb-4388-97fc-8b3decf458ab',person='2ebfa97a-9c9b-4b20-81f8-87e5e9a207b8';
 const draft={date:'2026-10-01',time:'18:00',duration:60 as const,roomId:room,inviteeIds:[person]};
 describe('Slack booking adapter',()=>{

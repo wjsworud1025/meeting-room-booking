@@ -3,7 +3,7 @@ import {NextRequest} from 'next/server';
 import {installCookie,installState,verifyInstallState,startInstall,finishInstall} from '../src/slack/oauth';
 import {decryptToken,encryptToken,workspaceAuthorization,revokeInstallation} from '../src/slack/installations';
 const {query}=vi.hoisted(()=>({query:vi.fn()}));
-vi.mock('../src/server/db',()=>({pool:()=>({query})}));
+vi.mock('../src/server/db',()=>({saasEnabled:()=>false,pool:()=>({query})}));
 beforeEach(()=>{
  vi.stubEnv('APP_BASE_URL','https://booking.example.com');vi.stubEnv('SLACK_INSTALL_ENABLED','true');
  vi.stubEnv('SLACK_CLIENT_ID','123.456');vi.stubEnv('SLACK_CLIENT_SECRET','test-secret');vi.stubEnv('SLACK_APP_ID','ATEST');

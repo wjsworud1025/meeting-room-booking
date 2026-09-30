@@ -1,3 +1,4 @@
+import {saasEnabled} from '../server/db';
 import {readInstallRequest,connectInstallRequest} from '../server/class-install';
 import {createHmac,randomBytes,timingSafeEqual} from 'node:crypto';
 import {NextRequest,NextResponse} from 'next/server';
@@ -15,7 +16,7 @@ function settings(){
 }
 function sign(value:string){return createHmac('sha256',process.env.SESSION_SECRET!).update('slack-install:'+value).digest();}
 export function installState(team:string,invite?:string){
- settings();if(!invite)assertWorkspace(team);
+ settings();requireThat(!saasEnabled()||!!invite,'INVALID_FLOW','클래스 전용 설치 링크를 사용해 주세요.',400);if(!invite)assertWorkspace(team);
  const value=Buffer.from(JSON.stringify({team,invite,expires:Date.now()+600000,nonce:randomBytes(16).toString('hex')})).toString('base64url');
  return value+'.'+sign(value).toString('base64url');
 }
