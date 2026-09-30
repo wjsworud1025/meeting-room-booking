@@ -37,6 +37,7 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
  if(action==='venue.remove'){
   const v=z.object({id:uuid,reason}).strict().parse(input);
   requireThat((await db.query('SELECT id FROM venues WHERE id=$1 FOR UPDATE',[v.id])).rowCount,'NOT_FOUND','수업장을 찾을 수 없습니다.',404);
+  await db.query('UPDATE rooms SET venue_id=NULL WHERE venue_id=$1 AND NOT active AND NOT EXISTS(SELECT 1 FROM reservations r WHERE r.room_id=rooms.id)',[v.id]);
   const linked=(await db.query('SELECT EXISTS(SELECT 1 FROM rooms WHERE venue_id=$1) rooms,EXISTS(SELECT 1 FROM cohorts WHERE venue_id=$1) classes,EXISTS(SELECT 1 FROM class_install_requests WHERE venue_id=$1) requests',[v.id])).rows[0];
   requireThat(!linked.rooms&&!linked.classes&&!linked.requests,'CONFLICT','연결된 회의실·클래스 또는 설치 요청이 있습니다. 수업장을 변경하거나 설치 요청을 삭제한 후 다시 시도해 주세요.');
   await db.query('DELETE FROM venues WHERE id=$1',[v.id]);return {id:v.id};

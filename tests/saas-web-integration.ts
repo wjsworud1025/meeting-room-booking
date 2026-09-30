@@ -101,6 +101,8 @@ try{
 
  const unusedVenue=(await ok('commands',a,{name:'admin.venue.add',input:{name:'Unused venue',reason:'test removal'}})).data.id;
  assert.equal((await request('commands',b,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}})).status,404);
+ const retiredRoom=(await ok('commands',a,{name:'admin.room.add',input:{name:'Retired unused room',venueId:unusedVenue,capacity:4,minimum:2,reason:'test'}})).data.id;
+ await ok('commands',a,{name:'admin.room.remove',input:{id:retiredRoom,reason:'test'}});
  await ok('commands',a,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}});
  assert.equal((await request('commands',a,{name:'admin.venue.remove',input:{id:unusedVenue,reason:'test'}})).status,404);
  const roomA=(await ok('commands',a,{name:'admin.room.add',input:{name:'A only',venueId:av.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
