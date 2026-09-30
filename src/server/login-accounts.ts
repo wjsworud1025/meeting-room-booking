@@ -44,7 +44,7 @@ export async function bookingAccountSession(token:string):Promise<Session>{
  requireThat(a.status==='ACTIVE'&&a.member_id,'ACCOUNT_PENDING','독립 운영 공간을 준비 중입니다.',403);
  const m=(await pool().query("SELECT access_version FROM booking.members WHERE id=$1 AND role='ADMIN' AND status='ACTIVE'",[a.member_id])).rows[0];
  requireThat(m,'ACCESS_REVOKED','계정 접근이 해제되었습니다.',403);
- return {memberId:a.member_id,accessVersion:m.access_version,verifiedAt:new Date(a.created_at).getTime(),expiresAt:new Date(a.expires_at).getTime(),sessionId:randomUUID()};
+ return {loginId:a.login_id,memberId:a.member_id,accessVersion:m.access_version,verifiedAt:new Date(a.created_at).getTime(),expiresAt:new Date(a.expires_at).getTime(),sessionId:randomUUID()};
 }
 export async function changePassword(token:string,current:string,next:string){
  validatePassword(next);const a=await accountSession(token);const nextHash=await hashPassword(next);
