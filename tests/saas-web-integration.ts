@@ -9,7 +9,7 @@ import {importRoster} from '../src/server/workspace-roster';
 import {connectInstallRequest,readInstallRequest} from '../src/server/class-install';
 import {deliverNextNotification} from '../src/server/saas/worker';
 import {runTask} from '../src/server/jobs';
-import {queue} from '../src/server/store';
+import {queue,policy,roomPolicy} from '../src/server/store';
 import {inWorkspace} from '../src/server/saas/slack-routing';
 import {execute} from '../src/server/commands';
 import {adminReservationRange} from '../src/server/queries';
@@ -302,6 +302,23 @@ try{
   assert.ok((await ok('snapshot',b)).data.rooms.length>0);
  }finally{await lifeOps.end();}
  console.log('LIFECYCLE PASS: private ZIP export, foreign download denied, deletion pause/cancel, ID transfer/session revoke, seven-day purge and unaffected customer B.');
+
+ const secondVenue=(await ok('commands',b,{name:'admin.venue.add',input:{name:'Second B venue',reason:'test'}})).data.id;
+ const secondRoom=(await ok('commands',b,{name:'admin.room.add',input:{name:'Second B room',venueId:secondVenue,capacity:4,minimum:2,reason:'test'}})).data.id;
+ const venueRules1={...defaultRules,windowDays:7,maxMinutes:60,rooms:{[roomB]:{capacity:4,minimum:2}}};
+ const venueRules2={...defaultRules,windowDays:2,open:'09:00',close:'17:00',rooms:{[secondRoom]:{capacity:4,minimum:2}}};
+ await ok('commands',b,{name:'admin.policy',input:{venueId:bv.data.venues[0].id,effectiveOn:'2098-01-01',rules:venueRules1}});
+ await ok('commands',b,{name:'admin.policy',input:{venueId:secondVenue,effectiveOn:'2098-01-01',rules:venueRules2}});
+ await withTenant(tenantB.tenant_id,async()=>{
+ const db=await pool().connect();try{
+ assert.equal((await roomPolicy(db,'2098-01-01',roomB)).rules_json.windowDays,7);
+ assert.equal((await roomPolicy(db,'2098-01-01',secondRoom)).rules_json.open,'09:00');
+ assert.equal((await policy(db,'2097-12-31',secondVenue)).rules_json.open,defaultRules.open);
+ assert.equal((await policy(db,'2098-01-01')).rules_json.windowDays,defaultRules.windowDays);
+ }finally{db.release();}
+ });
+ assert.equal((await request('commands',b,{name:'admin.policy',input:{venueId:secondVenue,effectiveOn:'2098-01-02',rules:venueRules1}})).status,422);
+ console.log('VENUE POLICY PASS: same-day independent policies, room resolution, effective date and legacy fallback, foreign room rejected.');
  process.env.SAAS_RELEASE_MODE='pilot';
  assert.equal((await request('auth/account/register',undefined,{loginId:'pilot_denied',password:'customer-password'})).status,503);
  assert.equal((await request('auth/account/space',b,{name:'second space'})).status,503);

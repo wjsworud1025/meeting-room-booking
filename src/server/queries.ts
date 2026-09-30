@@ -17,8 +17,10 @@ export async function reservationDetail(session:Session,id:string){
 }
 export async function snapshot(session:Session,date:string):Promise<Snapshot>{
  const db=await pool().connect();try{
-  await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const now=new Date(),me=await actor(db,session,now);const p=await policy(db,date),venue=me.role==='STUDENT'?await cohortVenue(db,me.cohort_id):undefined;
-  const rooms=(await db.query('SELECT r.*,v.name venue_name FROM rooms r LEFT JOIN venues v ON v.id=r.venue_id WHERE r.active ORDER BY v.name,r.display_order')).rows.filter(r=>me.role==='ADMIN'||!!venue&&r.venue_id===venue.id).map(r=>({...r,...p.rules_json.rooms[r.id]}));
+  await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const now=new Date(),me=await actor(db,session,now);const venue=me.role==='STUDENT'?await cohortVenue(db,me.cohort_id):undefined,p=await policy(db,date,venue?.id);
+  const venuePolicies=new Map<string,Awaited<ReturnType<typeof policy>>>();
+  if(me.role==='ADMIN')for(const v of (await db.query('SELECT id FROM venues')).rows)venuePolicies.set(v.id,await policy(db,date,v.id));
+  const rooms=(await db.query('SELECT r.*,v.name venue_name FROM rooms r LEFT JOIN venues v ON v.id=r.venue_id WHERE r.active ORDER BY v.name,r.display_order')).rows.filter(r=>me.role==='ADMIN'||!!venue&&r.venue_id===venue.id).map(r=>({...r,...(venuePolicies.get(r.venue_id)??p).rules_json.rooms[r.id]}));
   const visible=new Set(rooms.map(r=>r.id));
   const all=(await reservations(db,`(r.starts_at >= $1 AND r.starts_at < $2) OR
    (r.starts_at >= $3::date - interval '30 day' AND r.starts_at < GREATEST($3::date,$4::date) + interval '32 day'

@@ -7,7 +7,7 @@ import type {Member,Reservation} from '../shared/types';
 import {at,localDate,minutes} from '../shared/time';
 import {requireThat} from './errors';
 import {checkFairness,ensureOpen,validWindow} from './policy';
-import {audit,member,notifyReservation,policy,reservation,reservations,student} from './store';
+import {audit,member,notifyReservation,policy,roomPolicy,reservation,reservations,student} from './store';
 
 const uuid=z.string().uuid();
 const period=z.object({roomId:uuid,startsAt:z.iso.datetime({offset:true}),endsAt:z.iso.datetime({offset:true})}).strict();
@@ -32,7 +32,7 @@ export async function cancelReservation(db:DB,r:Reservation,now:Date,reason:stri
  await db.query("UPDATE reservations SET status='CANCELLED',cancel_reason=$2,version=version+1,transfer_request_id=NULL,transfer_to_id=NULL,transfer_from_id=NULL,transfer_expires_at=NULL WHERE id=$1",[r.id,reason]);
  await db.query("UPDATE reservation_members SET status='REVOKED' WHERE reservation_id=$1 AND status='INVITED'",[r.id]);
  await syncClaims(db,r.id);
- if(cooldownFrom){const p=await policy(db,localDate(r.starts_at));await db.query('UPDATE members SET cooldown_until=GREATEST(cooldown_until,$2) WHERE id=$1',[r.creator_id,new Date(cooldownFrom.getTime()+minutes(p.rules_json.cooldownMinutes))]);}
+ if(cooldownFrom){const p=await roomPolicy(db,localDate(r.starts_at),r.room_id);await db.query('UPDATE members SET cooldown_until=GREATEST(cooldown_until,$2) WHERE id=$1',[r.creator_id,new Date(cooldownFrom.getTime()+minutes(p.rules_json.cooldownMinutes))]);}
  await audit(db,null,'reservation.cancel',r.id,reason,now,randomUUID(),{},r.cohort_id);
 }
 export async function boundaries(db:DB,now:Date){
@@ -54,7 +54,7 @@ function beforeStart(r:Reservation,now:Date){requireThat(!['CANCELLED','ENDED'].
 function version(r:Reservation,n:number){requireThat(r.version===n,'STALE_VERSION','예약이 변경되었습니다. 최신 내용을 확인해 주세요.');}
 function organizer(r:Reservation,m:Member){requireThat(r.organizer_id===m.id||m.role==='ADMIN','FORBIDDEN','예약 책임자만 변경할 수 있습니다.',403);}
 async function checkPeriod(db:DB,roomId:string,start:string,end:string,now:Date,excludeId?:string){
- const p=await policy(db,localDate(start));const rules=p.rules_json;validWindow(start,end,now,rules);
+ const p=await roomPolicy(db,localDate(start),roomId);const rules=p.rules_json;validWindow(start,end,now,rules);
  const room=await db.query('SELECT * FROM rooms WHERE id=$1 AND active',[roomId]);requireThat(room.rowCount&&rules.rooms[roomId],'ROOM_UNAVAILABLE','운영 중인 회의실을 선택해 주세요.');
  const exceptions=await db.query('SELECT * FROM opening_exceptions WHERE local_date=$1',[localDate(start)]);const holidays=await holidayYear(db,Number(localDate(start).slice(0,4)));ensureOpen(start,end,roomId,rules,exceptions.rows,!!holidays.days[localDate(start)]);
  const overlap=await db.query("SELECT 1 FROM reservations WHERE room_id=$1 AND status IN ('HOLDING','CONFIRMED','REPLENISHING') AND starts_at<$3 AND ends_at>$2 AND ($4::uuid IS NULL OR id<>$4)",[roomId,start,end,excludeId??null]);
@@ -71,7 +71,7 @@ async function eligibility(db:DB,ids:string[],now:Date){
  const byId=new Map(members.map(m=>[m.id,m])),blocked=new Set(restricted.map(s=>s.member_id));
  for(const id of ids){const m=byId.get(id);requireThat(m,'NOT_FOUND','계정을 찾을 수 없습니다.',404);requireThat(m.role==='STUDENT'&&m.status==='ACTIVE','FORBIDDEN','활성 학생 계정만 이용할 수 있습니다.',403);requireThat(!blocked.has(id),'MEMBER_RESTRICTED','이용 제한 기간입니다. 운영 담당자에게 문의해 주세요.');}
 }
-async function fairness(db:DB,r:Reservation,now:Date){const p=await policy(db,localDate(r.starts_at));const others=await reservations(db,"r.id<>$1 AND r.status IN ('CONFIRMED','REPLENISHING','ENDED') AND r.starts_at < $3::timestamptz + ($4 * interval '1 minute') AND r.ends_at > $2::timestamptz - ($4 * interval '1 minute')",[r.id,r.starts_at,r.ends_at,p.rules_json.gapMinutes]);checkFairness(r,others,now,p.rules_json);}
+async function fairness(db:DB,r:Reservation,now:Date){const p=await roomPolicy(db,localDate(r.starts_at),r.room_id);const others=await reservations(db,"r.id<>$1 AND r.status IN ('CONFIRMED','REPLENISHING','ENDED') AND r.starts_at < $3::timestamptz + ($4 * interval '1 minute') AND r.ends_at > $2::timestamptz - ($4 * interval '1 minute')",[r.id,r.starts_at,r.ends_at,p.rules_json.gapMinutes]);checkFairness(r,others,now,p.rules_json);}
 export async function settle(db:DB,id:string,now:Date,validateFair=true){
  let r=await reservation(db,id);if(['CANCELLED','ENDED'].includes(r.status))return;
  if(r.accepted_count>=r.minimum_snapshot){
@@ -82,7 +82,7 @@ export async function settle(db:DB,id:string,now:Date,validateFair=true){
    await notifyReservation(db,await reservation(db,id),'예약 확정');
   }
  }else if(r.first_confirmed_at&&new Date(r.starts_at)>now){
-  const p=await policy(db,localDate(r.starts_at));const deadline=r.replenish_deadline?new Date(r.replenish_deadline):new Date(Math.min(now.getTime()+minutes(p.rules_json.refillMinutes),new Date(r.starts_at).getTime()));
+  const p=await roomPolicy(db,localDate(r.starts_at),r.room_id);const deadline=r.replenish_deadline?new Date(r.replenish_deadline):new Date(Math.min(now.getTime()+minutes(p.rules_json.refillMinutes),new Date(r.starts_at).getTime()));
   const other=await db.query("SELECT 1 FROM reservations WHERE creator_id=$1 AND id<>$2 AND status IN ('HOLDING','REPLENISHING')",[r.creator_id,id]);
   if(deadline<=now||other.rowCount){await cancelReservation(db,r,now,'최소 인원 미달 예약의 유지 조건 미충족',now);return;}
   await db.query("UPDATE reservations SET status='REPLENISHING',replenish_deadline=$2 WHERE id=$1",[id,deadline]);

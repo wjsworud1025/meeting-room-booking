@@ -134,7 +134,25 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
  if(action==='policy'){
   const roomRule=z.object({capacity:z.number().int().min(2).max(100),minimum:z.number().int().min(2).max(100)}).refine(x=>x.minimum<=x.capacity);
   const rules=z.object({windowDays:z.number().int().min(1).max(30),slotMinutes:z.number().int().min(5).max(60),maxMinutes:z.number().int().min(30).max(720),holdMinutes:z.number().int().min(1).max(60),refillMinutes:z.number().int().min(1).max(60),cooldownMinutes:z.number().int().min(1).max(60),gapMinutes:z.number().int().min(1).max(1440),threshold:z.number().min(0).max(99),open:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),close:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),weekdays:z.array(z.number().int().min(0).max(6)).min(1),rooms:z.record(uuid,roomRule)}).strict();
-  const v=z.object({effectiveOn:z.iso.date(),rules,reason:z.string().trim().max(500).optional().default('')}).strict().parse(input),current=await policy(db,localDate(now));requireThat(v.effectiveOn>=addDays(localDate(now),current.rules_json.windowDays+1),'INVALID_POLICY_DATE','현재 열린 예약 기간 이후 날짜를 선택해 주세요.');requireThat(v.rules.open<v.rules.close&&v.rules.maxMinutes%v.rules.slotMinutes===0,'INVALID_INPUT','시간 정책의 단위와 범위를 확인해 주세요.',422);const roomIds=(await db.query('SELECT id FROM rooms WHERE active')).rows.map(x=>x.id);requireThat(roomIds.every(id=>v.rules.rooms[id]),'INVALID_INPUT','모든 회의실의 정원 정책이 필요합니다.',422);requireThat(Object.keys(v.rules.rooms).every(id=>roomIds.includes(id)),'INVALID_INPUT','현재 운영 공간의 회의실만 지정할 수 있습니다.',422);const id=randomUUID();await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify(v.rules),me.id]);return {id};
+
+  const v=z.object({venueId:uuid.optional(),effectiveOn:z.iso.date(),rules,reason:z.string().trim().max(500).optional().default('')}).strict().parse(input);
+  await db.query("SELECT pg_advisory_xact_lock(hashtext(COALESCE(current_setting('app.tenant_id',true),'legacy')||':policy'))");
+  if(v.venueId){await requireVenue(db,v.venueId);await db.query('SELECT id FROM venues WHERE id=$1 FOR UPDATE',[v.venueId]);}
+  const current=await policy(db,localDate(now),v.venueId);
+  requireThat(v.effectiveOn>=addDays(localDate(now),current.rules_json.windowDays+1),'INVALID_POLICY_DATE','현재 열린 예약 기간 이후 날짜를 선택해 주세요.');
+  requireThat(v.rules.open<v.rules.close&&v.rules.maxMinutes%v.rules.slotMinutes===0,'INVALID_INPUT','시간 정책의 단위와 범위를 확인해 주세요.',422);
+  const roomIds=(await db.query('SELECT id FROM rooms WHERE active AND ($1::uuid IS NULL OR venue_id=$1)',[v.venueId??null])).rows.map(x=>x.id);
+  requireThat(roomIds.every(id=>v.rules.rooms[id])&&Object.keys(v.rules.rooms).every(id=>roomIds.includes(id)),'INVALID_INPUT','선택한 수업장의 회의실 정원 정책만 지정해 주세요.',422);
+  const id=randomUUID();
+  if(v.venueId){
+   const existing=(await db.query('SELECT id,rules_json FROM policy_versions WHERE effective_on=$1 FOR UPDATE',[v.effectiveOn])).rows[0];
+   requireThat(!existing?.rules_json.venuePolicies?.[v.venueId],'CONFLICT','이 수업장의 해당 적용일 정책이 이미 있습니다.');
+   if(existing){await db.query("UPDATE policy_versions SET rules_json=jsonb_set(rules_json,'{venuePolicies}',COALESCE(rules_json->'venuePolicies','{}'::jsonb)||$2::jsonb) WHERE id=$1",[existing.id,JSON.stringify({[v.venueId]:v.rules})]);return {id:existing.id};}
+   const base=await policy(db,v.effectiveOn);
+   await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify({...base.rules_json,venueOnly:true,venuePolicies:{[v.venueId]:v.rules}}),me.id]);
+  }else await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify(v.rules),me.id]);
+  return {id};
+
  }
  if(action==='report.resolve'){const v=z.object({id:uuid,resolution:reason}).strict().parse(input);const result=await db.query("UPDATE reports SET status='RESOLVED',resolution=$2,resolved_by=$3 WHERE id=$1 AND status='OPEN' RETURNING reporter_id",[v.id,v.resolution,me.id]);requireThat(result.rowCount,'STALE_VERSION','이미 처리된 신고입니다.');await queue(db,'NOTIFY',`report:${v.id}`,{event:'신고 처리 완료'},result.rows[0].reporter_id,'AUTO');return {id:v.id};}
  if(action==='sanction'){
