@@ -2,7 +2,7 @@ import {spaceInfo,spaceAction,downloadExport} from '@/server/saas/lifecycle';
 import {scopedRequest} from '@/server/saas/request';
 import {controlPool,saasEnabled} from '@/server/db';
 import {defaultRules} from '@/server/policy';
-import {accountCookie,accountSession,registerAccount,loginAccount,changePassword,logoutAccount} from '@/server/login-accounts';
+import {accountCookie,accountSession,registerAccount,loginAccount,changeLoginId,changePassword,logoutAccount} from '@/server/login-accounts';
 import {adminCandidates} from '@/server/slack-admin';
 import {NextRequest,NextResponse} from 'next/server';
 import {z} from 'zod';
@@ -43,6 +43,7 @@ async function handle(req:NextRequest,method:string){try{
    if(path==='auth/account/space'){requireThat(process.env.SAAS_RELEASE_MODE!=='pilot','REGISTRATION_PAUSED','신규 운영 공간은 준비 중입니다.',503);requireThat(saasEnabled(),'SAAS_NOT_READY','독립 운영 공간을 준비 중입니다.',503);const a=await accountSession(req.cookies.get(accountCookie)?.value);requireThat(!a.must_change_password,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.',403);const v=z.object({name:z.string().trim().min(1).max(80)}).strict().parse(body);await controlPool().query('SELECT saas_control.create_space($1,$2,$3)',[a.id,v.name,JSON.stringify(defaultRules)]);return response({created:true});}
    if(path==='auth/account/register'){const v=credentials.parse(body);rateLimit('account-register:'+req.headers.get('x-forwarded-for'),5);await registerAccount(v.loginId,v.password);return response({created:true},201);}
    if(path==='auth/account/login'){const v=credentials.parse(body);const r=await loginAccount(v.loginId,v.password,v.remember);const res=response({mustChange:r.mustChange,status:r.status});res.cookies.delete(cookieName);res.cookies.set(accountCookie,r.token,{httpOnly:true,sameSite:'lax',secure:!isLocal(),path:'/',maxAge:r.seconds});return res;}
+   if(path==='auth/account/login-id'){const v=z.object({current:z.string().min(1).max(128),next:z.string().min(4).max(32)}).strict().parse(body);await changeLoginId(req.cookies.get(accountCookie)?.value??'',v.current,v.next);const res=response({changed:true});res.cookies.delete(accountCookie);res.cookies.delete(cookieName);return res;}
    if(path==='auth/account/password'){const v=z.object({current:z.string().min(1).max(128),next:z.string().min(10).max(128)}).strict().parse(body);await changePassword(req.cookies.get(accountCookie)?.value??'',v.current,v.next);const res=response({changed:true});res.cookies.delete(accountCookie);res.cookies.delete(cookieName);return res;}
   }
   if(path==='auth/slack/start'){rateLimit('slack:'+req.headers.get('x-forwarded-for'),30);const v=z.object({team:z.string().min(1).max(64).optional(),returnToApp:z.boolean().optional(),admin:z.boolean().optional()}).strict().parse(body);const res=await startSlack(v.team,v.returnToApp,v.admin);await logoutAccount(req.cookies.get(accountCookie)?.value);res.cookies.delete(accountCookie);return res;}

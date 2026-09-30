@@ -82,3 +82,17 @@ export async function reauthenticateAccount(token:string|undefined,password:stri
   await db.query('UPDATE identity.accounts SET failed_attempts=0,locked_until=NULL WHERE id=$1',[a.id]);await db.query('COMMIT');return a;
  }catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}
 }
+
+export async function changeLoginId(token:string,current:string,next:string){
+ const id=normalizeLogin(next),a=await reauthenticateAccount(token,current);
+ requireThat(id!==a.login_id,'INVALID_LOGIN_ID','현재와 다른 아이디를 입력해 주세요.',422);
+ requireThat(id!=='hyundai_1st','LOGIN_ID_UNAVAILABLE','사용할 수 없는 아이디입니다.',409);
+ const db=await controlPool().connect();try{
+ await db.query('BEGIN');
+ const row=(await db.query('SELECT version FROM identity.accounts WHERE id=$1 FOR UPDATE',[a.id])).rows[0];
+ requireThat(row?.version===a.version,'UNAUTHENTICATED','다시 로그인해 주세요.',401);
+ await db.query('UPDATE identity.accounts SET login_id=$2,version=version+1 WHERE id=$1',[a.id,id]);
+ await db.query('DELETE FROM identity.sessions WHERE account_id=$1',[a.id]);
+ await db.query('COMMIT');
+ }catch(e){await db.query('ROLLBACK');if((e as {code?:string}).code==='23505')throw new AppError('LOGIN_ID_UNAVAILABLE','사용할 수 없는 아이디입니다.',409);throw e;}finally{db.release();}
+}

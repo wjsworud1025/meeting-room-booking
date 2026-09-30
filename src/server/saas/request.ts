@@ -6,7 +6,7 @@ import {accountCookie,accountSession} from '../login-accounts';
 import {AppError,requireThat} from '../errors';
 import {saasEnabled,basePool,controlPool} from '../db';
 import {tenantForAccount,withTenant} from './runtime';
-const publicPaths=new Set(['config','health','auth/account/login','auth/account/register','auth/account/me','auth/account/password','auth/account/space','auth/logout','auth/account/space-info','auth/account/space-action','auth/account/export-download']);
+const publicPaths=new Set(['config','health','auth/account/login','auth/account/register','auth/account/me','auth/account/password','auth/account/login-id','auth/account/space','auth/logout','auth/account/space-info','auth/account/space-action','auth/account/export-download']);
 export async function scopedRequest(req:NextRequest,handle:()=>Promise<NextResponse>){
  if(!saasEnabled())return handle();
  try{

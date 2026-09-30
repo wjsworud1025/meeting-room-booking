@@ -281,7 +281,22 @@ try{
  assert.ok((await ok('snapshot',b)).data.rooms.length>0);
  delete process.env.SAAS_RELEASE_MODE;
  console.log('PILOT PASS: existing customer works; signup/new spaces/deletion requests remain closed.');
- await ok('auth/logout',b,{});assert.equal((await request('snapshot',b)).status,401);
+
+ assert.equal((await request('auth/account/login-id',b,{current:'wrong-password',next:'customer_new'})).status,401);
+ assert.equal((await request('auth/account/login-id',b,{current:'customer-password',next:'bad!'})).status,422);
+ await ok('auth/account/register',undefined,{loginId:'occupied_id',password:'another-password'});
+ assert.equal((await request('auth/account/login-id',b,{current:'customer-password',next:'occupied_id'})).status,409);
+ await ok('auth/account/login-id',b,{current:'customer-password',next:'customer_new'});
+ assert.equal((await request('snapshot',b)).status,401);
+ assert.equal((await request('auth/account/login',undefined,{loginId:'customer_b',password:'customer-password'})).status,401);
+ const renamed=(await ok('auth/account/login',undefined,{loginId:'customer_new',password:'customer-password'})).response.cookies.get('booking-account')!.value;
+ const afterRename=(await ok('snapshot',renamed)).data;
+ assert.equal(afterRename.me.login_id,'customer_new');
+ assert.ok(afterRename.rooms.length>0);
+ assert.equal((await tenantForAccount((await controlPool().query("SELECT id FROM identity.accounts WHERE login_id='customer_new'")).rows[0].id)).tenant_id,tenantB.tenant_id);
+ await ok('auth/logout',renamed,{});assert.equal((await request('snapshot',renamed)).status,401);
+ console.log('LOGIN ID PASS: password/format/duplicate validation, session revocation, new login and tenant ownership preserved.');
+
  console.log('PASS: real API registration/login/provision retry; restricted control/web roles; owner routes; A/B snapshot/commands; cross-tenant change denied; logout; no-context and legacy Slack blocked.');
 }finally{
  db?.release();await globalDB.bookingPool?.end();await globalDB.bookingControlPool?.end();await globalDB.bookingSchedulerPool?.end();delete globalDB.bookingPool;delete globalDB.bookingControlPool;delete globalDB.bookingSchedulerPool;delete process.env.SAAS_ENABLED;

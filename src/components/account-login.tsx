@@ -22,7 +22,7 @@ export default function AccountLogin({mode='login'}:{mode?:'login'|'register'|'p
    if(saas){const info=await api<{space:{status:string}|null}>('auth/account/space-info');router.replace(info.space?.status==='ACTIVE'?'/admin/reservations':'/account');}
    else router.replace(a.status==='ACTIVE'?'/admin/reservations':'/account');}
  }catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- useEffect(()=>{if(mode==='login'){const q=new URLSearchParams(location.search);setNotice(q.has('transferred')?'관리자 권한을 받았습니다. 다시 로그인해 주세요.':q.has('changed')?'비밀번호를 변경했습니다. 다시 로그인해 주세요.':q.has('registered')?'아이디를 만들었습니다. 로그인해 주세요.':'');}},[mode]);
+ useEffect(()=>{if(mode==='login'){const q=new URLSearchParams(location.search);setNotice(q.has('loginIdChanged')?'아이디를 변경했습니다. 새 아이디로 로그인해 주세요.':q.has('transferred')?'관리자 권한을 받았습니다. 다시 로그인해 주세요.':q.has('changed')?'비밀번호를 변경했습니다. 다시 로그인해 주세요.':q.has('registered')?'아이디를 만들었습니다. 로그인해 주세요.':'');}},[mode]);
  if(mode==='register'&&pilot)return <section className="login-card"><h1>신규 가입 준비 중</h1><Link href="/admin/login">로그인으로 돌아가기</Link></section>;
  if(mode==='account'&&saas&&account)return <AccountSpace loginId={account.loginId}/>;
  if(mode==='account'&&(saas===null||!account))return <main className="login-page"><section className="login-card"><p role="status">계정을 확인하고 있습니다…</p><ErrorNotice error={error}/></section></main>;
