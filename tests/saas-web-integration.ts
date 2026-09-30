@@ -35,7 +35,7 @@ await control.connect();await control.query(`CREATE DATABASE "${name}"`);
 const url=new URL(original);url.pathname='/'+name;process.env.DATABASE_URL=url.toString();process.env.APP_BASE_URL='http://localhost:3015';
 let db:pg.PoolClient|undefined;let rolesMade=false;
 const globalDB=globalThis as unknown as {bookingPool?:pg.Pool;bookingControlPool?:pg.Pool;bookingSchedulerPool?:pg.Pool};
-async function request(path:string,token?:string,body?:unknown){const req=new NextRequest('http://localhost:3015/api/'+path,{method:body===undefined?'GET':'POST',headers:{origin:'http://localhost:3015','content-type':'application/json',...(token?{cookie:'booking-account='+token}:{}),'idempotency-key':randomUUID()},body:body===undefined?undefined:JSON.stringify(body)});return body===undefined?GET(req):POST(req);}
+async function request(path:string,token?:string,body?:unknown){const req=new NextRequest(process.env.APP_BASE_URL+'/api/'+path,{method:body===undefined?'GET':'POST',headers:{origin:process.env.APP_BASE_URL!,'content-type':'application/json',...(token?{cookie:'booking-account='+token}:{}),'idempotency-key':randomUUID()},body:body===undefined?undefined:JSON.stringify(body)});return body===undefined?GET(req):POST(req);}
 async function ok(path:string,token?:string,body?:unknown){const r=await request(path,token,body);const json=await r.json();assert.ok(r.status<300,JSON.stringify({path,status:r.status,json}));return {response:r,data:json.data};}
 try{
  for(const f of readdirSync('db/migrations').filter(f=>f.endsWith('.sql')).sort())await pool().query(readFileSync('db/migrations/'+f,'utf8'));
@@ -88,6 +88,16 @@ try{
  await ok('auth/account/space',b,{name:'Customer B'});await ok('auth/account/space',b,{name:'Retry does not create another'});
  const av=await ok('admin/data?section=settings',a),bv=await ok('admin/data?section=settings',b);
  assert.equal(bv.data.venues.length,1);assert.notEqual(av.data.venues[0].id,bv.data.venues[0].id);
+
+ process.env.APP_BASE_URL='https://example.test';
+ const disposable=(await ok('commands',a,{name:'admin.classInstall.create',input:{name:'Disposable request',venueId:av.data.venues[0].id}})).data;
+ assert.equal((await request('commands',a,{name:'admin.classInstall.delete',input:{id:disposable.id}})).status,409);
+ await ok('commands',a,{name:'admin.classInstall.revoke',input:{id:disposable.id}});
+ assert.equal((await request('commands',b,{name:'admin.classInstall.delete',input:{id:disposable.id}})).status,409);
+ await ok('commands',a,{name:'admin.classInstall.delete',input:{id:disposable.id}});
+ await assert.rejects(()=>readInstallRequest(new URL(disposable.url).searchParams.get('token')!));
+ process.env.APP_BASE_URL='http://localhost:3015';
+ console.log('INSTALL DELETE PASS: active request protected, foreign customer denied, revoked request deleted and link invalidated.');
  const roomA=(await ok('commands',a,{name:'admin.room.add',input:{name:'A only',venueId:av.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
  const roomB=(await ok('commands',b,{name:'admin.room.add',input:{name:'B only',venueId:bv.data.venues[0].id,capacity:4,minimum:2,reason:'test'}})).data.id;
  const sa=(await ok('snapshot',a)).data,sb=(await ok('snapshot',b)).data;

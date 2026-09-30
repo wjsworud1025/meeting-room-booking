@@ -15,6 +15,7 @@ export async function installRequestCommand(db:DB,action:string,input:unknown,no
  }else{
   const v=z.object({id:z.string().uuid()}).strict().parse(input);id=v.id;
   const r=(await db.query('SELECT * FROM class_install_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];requireThat(r&&!r.completed_at,'CONFLICT','이미 연결되었거나 없는 설치 요청입니다.');
+  if(action==='delete'){requireThat(r.revoked_at||new Date(r.expires_at)<=now,'CONFLICT','취소되거나 만료된 설치 요청만 삭제할 수 있습니다.');await db.query('DELETE FROM class_install_requests WHERE id=$1',[id]);return {id};}
   requireThat(action==='reissue'||action==='revoke','INVALID_INPUT','잘못된 요청입니다.',422);
   if(action==='revoke'){await db.query('UPDATE class_install_requests SET revoked_at=$2 WHERE id=$1',[id,now]);return {id};}
   await db.query('UPDATE class_install_requests SET token_hash=$2,expires_at=$3,revoked_at=NULL WHERE id=$1',[id,hash,expires]);
