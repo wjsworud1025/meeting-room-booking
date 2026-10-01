@@ -339,6 +339,10 @@ try{
  const renamed=(await ok('auth/account/login',undefined,{loginId:'customer_new',password:'customer-password'})).response.cookies.get('booking-account')!.value;
  const afterRename=(await ok('snapshot',renamed)).data;
  assert.equal(afterRename.me.login_id,'customer_new');
+ const renamedHistory=(await ok('admin/data?section=history',renamed)).data.audits;
+ assert.ok(renamedHistory.some((r:any)=>r.actor_id===afterRename.me.id));
+ assert.ok(renamedHistory.filter((r:any)=>r.actor_id===afterRename.me.id).every((r:any)=>r.actor_name==='customer_new'));
+
  assert.ok(afterRename.rooms.length>0);
  assert.equal((await tenantForAccount((await controlPool().query("SELECT id FROM identity.accounts WHERE login_id='customer_new'")).rows[0].id)).tenant_id,tenantB.tenant_id);
  await ok('auth/logout',renamed,{});assert.equal((await request('snapshot',renamed)).status,401);

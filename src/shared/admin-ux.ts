@@ -30,6 +30,7 @@ export function studentImport(csv:string,existing:{email:string|null;status:stri
  return {rows,errors,students:rows.map(({name,email,className})=>({name,email,className}))};
 }
 export const adminActionLabels:Record<string,string>={
+ 'admin.venue.add':'수업장 추가','admin.venue.rename':'수업장 이름 변경','admin.venue.remove':'수업장 제거','admin.classInstall.delete':'클래스 설치 요청 삭제',
  'admin.classInstall.create':'클래스 설치 링크 생성','admin.classInstall.reissue':'클래스 설치 링크 재발급','admin.classInstall.revoke':'클래스 설치 링크 취소',
  'admin.room.add':'회의실 추가','admin.room.rename':'회의실 이름 변경','admin.room.remove':'회의실 제거',
  'admin.workspace.register':'워크스페이스 등록','admin.workspace.end':'워크스페이스 기수 종료','booking.create':'예약 신청','booking.change':'예약 변경','booking.cancel':'예약 취소','booking.invite':'구성원 자동 참여','booking.leave':'본인 참여 취소','reservation.cancel':'예약 자동 취소',
