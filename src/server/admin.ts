@@ -132,6 +132,21 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
   requireThat(!count,'ROOM_HAS_RESERVATIONS',`진행 중이거나 예정된 예약이 ${count}건 있습니다. 예약을 이동하거나 취소한 후 제거해 주세요.`);
   const changed=await db.query('UPDATE rooms SET active=false WHERE id=$1 AND active',[v.id]);requireThat(changed.rowCount,'ROOM_UNAVAILABLE','이미 제거된 회의실입니다.');return {id:v.id};
  }
+ if(action==='policy.remove'){
+  const v=z.object({id:uuid,venueId:uuid,reason:z.string().max(500).optional()}).strict().parse(input);
+  await db.query("SELECT pg_advisory_xact_lock(hashtext(COALESCE(current_setting('app.tenant_id',true),'legacy')||':policy'))");
+  await requireVenue(db,v.venueId);
+  const row=(await db.query('SELECT * FROM policy_versions WHERE id=$1 FOR UPDATE',[v.id])).rows[0];
+  requireThat(row,'POLICY_NOT_FOUND','이미 삭제된 정책입니다.',404);
+  requireThat(row.effective_on>localDate(now),'POLICY_IN_USE','현재 적용 중이거나 과거에 적용된 정책은 삭제할 수 없습니다.');
+  requireThat(row.rules_json.venuePolicies?.[v.venueId],'POLICY_SHARED','공통 기본 정책은 이 수업장에서 삭제할 수 없습니다.');
+  const used=(await db.query('SELECT 1 FROM reservations WHERE policy_version_id=$1 LIMIT 1',[v.id])).rowCount;
+  requireThat(!used,'POLICY_IN_USE','예약에 사용된 정책은 삭제할 수 없습니다.');
+  const remaining={...row.rules_json.venuePolicies};delete remaining[v.venueId];
+  if(row.rules_json.venueOnly&&!Object.keys(remaining).length)await db.query('DELETE FROM policy_versions WHERE id=$1',[v.id]);
+  else await db.query("UPDATE policy_versions SET rules_json=jsonb_set(rules_json,'{venuePolicies}',$2::jsonb) WHERE id=$1",[v.id,JSON.stringify(remaining)]);
+  return {id:v.id,venueId:v.venueId};
+ }
  if(action==='policy'){
   const roomRule=z.object({capacity:z.number().int().min(2).max(100),minimum:z.number().int().min(2).max(100)}).refine(x=>x.minimum<=x.capacity);
   const rules=z.object({windowDays:z.number().int().min(1).max(30),slotMinutes:z.number().int().min(5).max(60),maxMinutes:z.number().int().min(30).max(720),holdMinutes:z.number().int().min(1).max(60),refillMinutes:z.number().int().min(1).max(60),cooldownMinutes:z.number().int().min(1).max(60),gapMinutes:z.number().int().min(1).max(1440),threshold:z.number().min(0).max(99),open:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),close:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),weekdays:z.array(z.number().int().min(0).max(6)).min(1),rooms:z.record(uuid,roomRule)}).strict();
