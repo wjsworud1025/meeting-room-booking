@@ -17,8 +17,11 @@ export async function scopedRequest(req:NextRequest,handle:()=>Promise<NextRespo
   if(publicPaths.has(path))return handle();
   // Legacy email/Slack entry paths remain closed until their own verified routing is converted.
   requireThat(!path.startsWith('auth/'),'SAAS_AUTH_UNAVAILABLE','현재는 아이디로 로그인해 주세요.',403);
-  if(!req.cookies.get(accountCookie)?.value){const value=req.cookies.get(cookieName)?.value;requireThat(value,'UNAUTHENTICATED','로그인이 필요합니다.',401);const session=unseal(value);requireThat(session.slack,'UNAUTHENTICATED','Slack에서 다시 접속해 주세요.',401);return await inWorkspace(session.slack.team,handle);}
-  const a=await accountSession(req.cookies.get(accountCookie)?.value);
+  const context=req.headers.get('x-booking-context');
+  const accountToken=context==='student'?undefined:req.cookies.get(accountCookie)?.value;
+  requireThat(context!=='admin'||accountToken,'UNAUTHENTICATED','관리자로 로그인해 주세요.',401);
+  if(!accountToken){const value=req.cookies.get(cookieName)?.value;requireThat(value,'UNAUTHENTICATED','로그인이 필요합니다.',401);const session=unseal(value);requireThat(session.slack,'UNAUTHENTICATED','Slack에서 다시 접속해 주세요.',401);return await inWorkspace(session.slack.team,handle);}
+  const a=await accountSession(accountToken);
   requireThat(!a.must_change_password,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.',403);
   const route=await tenantForAccount(a.id);
   return await withTenant(route.tenant_id,handle);

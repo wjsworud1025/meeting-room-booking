@@ -1,4 +1,3 @@
-import {accountCookie,logoutAccount} from '@/server/login-accounts';
 import {NextRequest,NextResponse} from 'next/server';
 import {z} from 'zod';
 import {cookieName,isLocal,rateLimit,seal} from '@/server/auth';
@@ -12,7 +11,6 @@ export async function POST(req:NextRequest){
   rateLimit('slack-web:'+token,30);
   const {session,destination}=await redeemWebLink(token);
   const response=NextResponse.json({destination},{headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
-  await logoutAccount(req.cookies.get(accountCookie)?.value);response.cookies.delete(accountCookie);
   response.cookies.set(cookieName,seal(session),{httpOnly:true,sameSite:'lax',secure:!isLocal(),path:'/',maxAge:8*3600});return response;
  }catch(error){if(error instanceof AppError&&error.code==='LINK_PENDING')return NextResponse.json({pending:true},{status:202,headers:{'Cache-Control':'no-store'}});return NextResponse.json({error:error instanceof AppError?error.message:'Slack에서 다시 열어 주세요.'},{status:error instanceof AppError?error.status:400,headers:{'Cache-Control':'no-store'}});}
 }
