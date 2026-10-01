@@ -345,6 +345,13 @@ try{
 
  assert.ok(afterRename.rooms.length>0);
  assert.equal((await tenantForAccount((await controlPool().query("SELECT id FROM identity.accounts WHERE login_id='customer_new'")).rows[0].id)).tenant_id,tenantB.tenant_id);
+
+ assert.equal((await request('auth/account/password',renamed,{current:'customer-password',next:''})).status,422);
+ await ok('auth/account/password',renamed,{current:'customer-password',next:'a'});
+ assert.equal((await request('auth/account/me',renamed)).status,401);
+ const shortPasswordSession=(await ok('auth/account/login',undefined,{loginId:'customer_new',password:'a'})).response.cookies.get('booking-account')!.value;
+ await ok('auth/logout',shortPasswordSession,{});
+ console.log('PASSWORD PASS: one-character password change/login accepted; empty password rejected; old session revoked.');
  await ok('auth/logout',renamed,{});assert.equal((await request('snapshot',renamed)).status,401);
  console.log('LOGIN ID PASS: password/format/duplicate validation, session revocation, new login and tenant ownership preserved.');
 

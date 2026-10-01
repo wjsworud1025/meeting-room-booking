@@ -7,7 +7,7 @@ import type {Session} from '../shared/types';
 const scrypt=promisify(scryptCallback);
 export const accountCookie='booking-account';
 export function normalizeLogin(value:string){const id=value.trim().toLowerCase();requireThat(/^[a-z0-9_]{4,32}$/.test(id),'INVALID_LOGIN_ID','아이디는 영문 소문자·숫자·밑줄 4~32자로 입력해 주세요.',422);return id;}
-export function validatePassword(p:string){requireThat(p.length>=10&&p.length<=128,'INVALID_PASSWORD','비밀번호는 10~128자로 입력해 주세요.',422);}
+export function validatePassword(p:string){requireThat(p.length>=1&&p.length<=128,'INVALID_PASSWORD','비밀번호를 1~128자로 입력해 주세요.',422);}
 export async function hashPassword(password:string){const salt=randomBytes(16).toString('hex');return salt+':'+(await scrypt(password,salt,64) as Buffer).toString('hex');}
 async function matches(password:string,hash:string){const [salt,key]=hash.split(':');const actual=await scrypt(password,salt,64) as Buffer;const expected=Buffer.from(key,'hex');return actual.length===expected.length&&timingSafeEqual(actual,expected);}
 const tokenHash=(v:string)=>createHash('sha256').update(v).digest('hex');
