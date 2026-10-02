@@ -11,7 +11,7 @@ export type Draft=z.infer<typeof inputSchema>;
 export function commandInput(draft:Draft){const v=inputSchema.parse(draft);return {roomId:v.roomId,startsAt:at(v.date,v.time).toISOString(),endsAt:new Date(at(v.date,v.time).getTime()+v.duration*60000).toISOString(),inviteeIds:[...new Set(v.inviteeIds)]};}
 export function messageView(text:string):ModalView{return {type:'modal',title:plain('회의실 예약'),close:plain('닫기'),blocks:[paragraph(text)]};}
 export function home(data:Snapshot|undefined,base:string,message?:string,team?:string,native=false,links:Record<string,string>={}):HomeView{
- const adminLogin:KnownBlock={type:'actions',elements:[{type:'button',text:plain('관리자 로그인'),action_id:'web_admin_login',url:base+'/admin/login'}]};
+ const adminLogin:KnownBlock={type:'context',elements:[{type:'mrkdwn',text:'<'+base+'/admin/login|운영 담당자 로그인>'}]};
  const blocks:KnownBlock[]=[{type:'header',text:plain('회의실 예약')}];
  if(message)blocks.push(paragraph(message));
  if(!data){blocks.push(paragraph('Slack에서 다시 열어 주세요.'),{type:'actions',elements:[{type:'button',text:plain('다시 시도'),action_id:'refresh'}]});if(!native)blocks.push({type:'actions',elements:[{type:'button',text:plain('계정 연결'),action_id:'web_login',url:base+'/login'+(team?'?slack_team='+encodeURIComponent(team)+'&slack_app=1':'')}]});blocks.push(adminLogin);return {type:'home',blocks};}

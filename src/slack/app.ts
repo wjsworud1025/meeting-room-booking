@@ -1,3 +1,4 @@
+import {inWorkspace} from '../server/saas/slack-routing';
 import {respondSlackAdmin} from '../server/slack-admin';
 import {publish} from './publish-home';
 import {App,LogLevel} from '@slack/bolt';
@@ -6,7 +7,7 @@ import {workspaceAuthorization,revokeInstallation} from './installations';
 import {ensureSlackMembers,nativeMembership} from './members';
 import {slackSession} from './identity';
 import {snapshot} from '../server/queries';
-import {pool} from '../server/db';
+import {pool,basePool,controlPool,saasEnabled} from '../server/db';
 import {AppError} from '../server/errors';
 import {createWebLink,activateWebLink} from '../server/slack-web';
 import {localDate} from '../shared/time';
@@ -15,6 +16,7 @@ for(const name of ['SLACK_APP_TOKEN','DATABASE_URL','APP_BASE_URL'])if(!process.
 if(process.env.SLACK_APP_ENABLED!=='true')throw Error('SLACK_APP_ENABLED is required');
 const base=new URL(process.env.SLACK_WEB_BASE_URL??process.env.APP_BASE_URL!).origin;
 const app=new App({authorize:async source=>workspaceAuthorization(source.teamId??''),appToken:process.env.SLACK_APP_TOKEN,socketMode:true,clientOptions:{timeout:10000,retryConfig:{retries:0}},logLevel:LogLevel.ERROR});
+app.use(async({context,next})=>{if(saasEnabled())await inWorkspace(context.teamId??'',next);else await next();});
 const readable=(e:unknown)=>e instanceof AppError?e.message:'연결하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 app.event('app_home_opened',async({event,body,client})=>{await publish(client,body.team_id!,event.user);});
 app.event('app_uninstalled',async({body})=>{await revokeInstallation(body.team_id!);});
@@ -30,6 +32,6 @@ app.action('open_web',async({ack,body,action,client})=>{
 app.action(/^(new_booking|slot_|schedule_|focus_room)/,async({ack,body,client})=>{await ack();await publish(client,body.team?.id??'',body.user.id);});
 app.view(/^booking_submit/,async({ack})=>{await ack({response_action:'update',view:messageView('예약 화면이 바뀌었습니다. 앱 홈의 회의실 예약하기를 눌러 주세요.')});});
 app.error(async()=>{console.error('booking.slack-app: request failed (details redacted)');});
-await pool().query('SELECT token_hash FROM slack_web_links LIMIT 0');
+if(saasEnabled())await basePool().query('SELECT 1');else await pool().query('SELECT token_hash FROM slack_web_links LIMIT 0');
 await app.start();console.log('Slack booking web launcher connected via Socket Mode.');
-for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>{void app.stop().then(()=>pool().end()).finally(()=>process.exit(0));});
+for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>{void app.stop().then(()=>Promise.all([basePool().end(),controlPool().end()])).finally(()=>process.exit(0));});

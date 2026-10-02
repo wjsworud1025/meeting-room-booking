@@ -263,7 +263,7 @@ try{
  await test('릴리즈 / 정책 적용일과 미래 정책 경계·기존 예약 보존',async()=>{
   const id=success(await create());const rules={...defaultRules,windowDays:10,rooms:Object.fromEntries(rooms.map((id,i)=>[id,{capacity:i===4?8:4,minimum:i===4?4:2}]))};
   assert.equal((await execute(session(admins[0]),'admin.policy',{effectiveOn:'2026-10-09',rules,reason:'정책 변경'},randomUUID(),now)).error?.code,'INVALID_POLICY_DATE');
-  success(await execute(session(admins[0]),'admin.policy',{effectiveOn:'2026-10-12',rules,reason:'정책 변경'},randomUUID(),now));
+  success(await execute(session(admins[0]),'admin.policy',{effectiveOn:'2026-10-12',rules},randomUUID(),now));
   success(await execute(session(ids[0]),'booking.create',{roomId:rooms[0],startsAt:at('2026-10-12','18:00').toISOString(),endsAt:at('2026-10-12','19:00').toISOString(),inviteeIds:[ids[1]]},randomUUID(),now));assert.equal((await get(id)).status,'CONFIRMED');
  });
  await test('릴리즈 / 알림 4회 실패에도 예약 보존·재시도와 최종 실패 기록',async()=>{

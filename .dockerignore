@@ -15,6 +15,10 @@
 !scripts/start-railway.mjs
 !scripts/migrate.ts
 !scripts/import-railway.mjs
+!scripts/saas
+!scripts/saas/**
+!db/saas-preparation
+!db/saas-preparation/**
 !deployment
 !deployment/initial-data.enc
 !Dockerfile

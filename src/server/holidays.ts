@@ -1,3 +1,4 @@
+import {saasEnabled} from './db';
 import {randomUUID} from 'node:crypto';
 import {XMLParser,XMLValidator} from 'fast-xml-parser';
 import {z} from 'zod';
@@ -58,6 +59,7 @@ export async function holidayInfo(year:number,admin=false){const db=await pool()
  return admin?{...result,state,task:task??null,configured:holidayKeyReady()||workerActive,workerEnabled:workerActive}:publicData;
  }catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}}
 export async function scheduleHolidaySync(db:DB,now:Date,manual=false){
+ if(saasEnabled()){if(!manual)return {queued:false};const result=await db.query('SELECT saas_control.request_holidays() queued');return {queued:result.rows[0].queued};}
  const localWorker=holidayKeyReady()&&process.env.RUN_JOBS==='true';
  if(!manual&&!localWorker)return {queued:false};
  if(!manual)await db.query('UPDATE holiday_sync SET worker_heartbeat=$1 WHERE id=1',[now]);
@@ -81,7 +83,7 @@ export async function holidayCommand(db:DB,me:Member,action:string,input:unknown
   const v=z.object({...common,name:z.string().trim().min(1).max(100).nullable(),sourceUrl:z.url().max(1000).refine(v=>/^https?:\/\//.test(v))}).strict().parse(input);
   const existing=(await db.query('SELECT version FROM holiday_overrides WHERE local_date=$1',[v.date])).rows[0];
   requireThat((existing?.version??0)===v.expectedVersion,'STALE_VERSION','휴일 정보가 변경되었습니다. 목록을 새로 확인해 주세요.');
-  await db.query("INSERT INTO holiday_overrides(local_date,name,source_url,reason,updated_by,updated_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(local_date) DO UPDATE SET name=$2,source_url=$3,reason=$4,updated_by=$5,updated_at=$6,version=nextval('holiday_override_version')",[v.date,v.name,v.sourceUrl,v.reason,me.id,now]);
+  await db.query(`INSERT INTO holiday_overrides(local_date,name,source_url,reason,updated_by,updated_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(${saasEnabled()?'tenant_id,':''}local_date) DO UPDATE SET name=$2,source_url=$3,reason=$4,updated_by=$5,updated_at=$6,version=nextval('holiday_override_version')`,[v.date,v.name,v.sourceUrl,v.reason,me.id,now]);
   return {date:v.date};
  }
  if(action==='reset'){

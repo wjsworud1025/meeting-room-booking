@@ -1,7 +1,8 @@
+import {withTenant} from './saas/runtime';
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {WebClient} from '@slack/web-api';
 import {z} from 'zod';
-import {pool} from './db';
+import {pool,controlPool,saasEnabled,databaseContext} from './db';
 import {requireThat} from './errors';
 import {allowedLocalHost} from './local-network';
 import {workspaceAuthorization} from '../slack/installations';
@@ -47,8 +48,9 @@ export async function verifySlackWebSession(session:Session){
   checked.set(key,now+60000);
  }
 }
-export async function redeemWebLink(token:string){
+export async function redeemWebLink(token:string):Promise<{session:Session;destination:string}>{
  requireThat(/^[A-Za-z0-9_-]{43}$/.test(token),'INVALID_FLOW','Slack에서 예약하기를 다시 눌러 주세요.',401);
+ if(saasEnabled()&&!databaseContext.getStore()){const r=await controlPool().query('SELECT saas_control.web_link_route($1) tenant',[digest(token)]);requireThat(r.rows[0]?.tenant,'INVALID_FLOW','연결이 만료되었습니다.',401);return withTenant(r.rows[0].tenant,()=>redeemWebLink(token));}
  // DELETE RETURNING makes concurrent redemption and replay impossible.
  const link=(await pool().query('DELETE FROM slack_web_links WHERE token_hash=$1 AND expires_at>clock_timestamp() AND ready RETURNING *',[digest(token)])).rows[0];
  if(!link){const pending=(await pool().query('SELECT 1 FROM slack_web_links WHERE token_hash=$1 AND NOT ready AND expires_at>clock_timestamp()',[digest(token)])).rowCount;requireThat(!pending,'LINK_PENDING','Slack 클릭을 확인하고 있습니다.',202);}

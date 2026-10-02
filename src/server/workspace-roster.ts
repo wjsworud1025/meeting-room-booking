@@ -1,5 +1,5 @@
 import {WebClient} from '@slack/web-api';
-import {pool,transaction,type DB} from './db';
+import {pool,transaction,saasEnabled,type DB} from './db';
 import {directory} from './member-search';
 import {allowedWorkspaces} from '../slack/workspaces';
 import {workspaceAuthorization} from '../slack/installations';
@@ -15,11 +15,12 @@ export async function importRoster(db:DB,team:string,people:{slackId:string;disp
  }
  await db.query('UPDATE slack_workspace_classes SET directory_synced_at=$2 WHERE team_id=$1',[team,now]);
 }
-let running=false,next=0;
+const runs=new Map<string,{running:boolean;next:number}>();
 export async function syncWorkspaceRosters(){
- if(running||Date.now()<next)return;running=true;next=Date.now()+30000;
+ const key=saasEnabled()?(await pool().query('SELECT saas_control.current_tenant() tenant')).rows[0].tenant:'legacy';
+ const state=runs.get(key)??{running:false,next:0};if(state.running||Date.now()<state.next)return;state.running=true;state.next=Date.now()+30000;runs.set(key,state);
  try{
   const groups=(await pool().query("SELECT w.team_id FROM slack_workspace_classes w JOIN cohorts c ON c.id=w.cohort_id JOIN slack_installations i ON i.team_id=w.team_id WHERE w.auto_enroll AND c.inactive_at IS NULL AND i.revoked_at IS NULL AND (w.directory_synced_at IS NULL OR w.directory_synced_at<clock_timestamp()-interval '5 minutes')")).rows;
   for(const {team_id:team} of groups){try{const auth=await workspaceAuthorization(team);const people=await directory(team,new WebClient(auth.botToken,{timeout:10000,retryConfig:{retries:0}}));await transaction((db,now)=>importRoster(db,team,people,now));}catch{console.error('booking.roster: sync failed; retrying later');}}
- }finally{running=false;}
+ }finally{state.running=false;}
 }
