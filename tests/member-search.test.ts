@@ -1,7 +1,7 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {searchMembers,resolveSlackMember,searchableName} from '../src/server/member-search';
 const {query,list,authorization,membership,ensure}=vi.hoisted(()=>({query:vi.fn(),list:vi.fn(),authorization:vi.fn(),membership:vi.fn(),ensure:vi.fn()}));
-vi.mock('../src/server/db',()=>({pool:()=>({query})}));
+vi.mock('../src/server/db',()=>({saasEnabled:()=>false,pool:()=>({query})}));
 vi.mock('../src/slack/installations',()=>({workspaceAuthorization:authorization}));
 vi.mock('../src/slack/members',async importOriginal=>({...await importOriginal<object>(),nativeMembership:membership,ensureSlackMembers:ensure}));
 vi.mock('@slack/web-api',()=>({WebClient:class{users={list};}}));

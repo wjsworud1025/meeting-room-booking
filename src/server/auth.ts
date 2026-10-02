@@ -1,3 +1,4 @@
+import {accountCookie,bookingAccountSession} from './login-accounts';
 import {createCipheriv,createDecipheriv,createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
 import {createClient} from '@supabase/supabase-js';
 import type {NextRequest} from 'next/server';
@@ -13,10 +14,13 @@ export function seal(session:Session){const iv=randomBytes(12),cipher=createCiph
 export function unseal(value:string):Session{try{const b=Buffer.from(value,'base64url'),dec=createDecipheriv('aes-256-gcm',secret(),b.subarray(0,12));dec.setAuthTag(b.subarray(12,28));const s=JSON.parse(Buffer.concat([dec.update(b.subarray(28)),dec.final()]).toString());requireThat(s.expiresAt>Date.now(),'UNAUTHENTICATED','다시 로그인해 주세요.',401);return s;}catch{throw new AppError('UNAUTHENTICATED','다시 로그인해 주세요.',401);}}
 export function supabase(service=false){const url=process.env.SUPABASE_URL,key=service?process.env.SUPABASE_SERVICE_ROLE_KEY:process.env.SUPABASE_ANON_KEY;requireThat(url&&key,'CONFIGURATION','인증 서비스 설정이 필요합니다.',503);return createClient(url,key,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}});}
 export async function authenticate(request:NextRequest,allowPending=false){
+ const context=request.headers.get('x-booking-context');
+ const accountToken=context==='student'?undefined:request.cookies.get(accountCookie)?.value;
+ if(accountToken){const session=await bookingAccountSession(accountToken);const db=await pool().connect();try{return {session,me:await actor(db,session,new Date(),allowPending)};}finally{db.release();}}
  const value=request.cookies.get(cookieName)?.value;requireThat(value,'UNAUTHENTICATED','로그인이 필요합니다.',401);const session=unseal(value);
  if(session.slack)await verifySlackWebSession(session);
  else if(!isLocal()||session.accessToken){requireThat(session.accessToken,'UNAUTHENTICATED','다시 로그인해 주세요.',401);const {data,error}=await supabase().auth.getUser(session.accessToken);requireThat(!error&&data.user,'UNAUTHENTICATED','인증이 만료되었습니다.',401);const m=await pool().query('SELECT auth_user_id FROM members WHERE id=$1',[session.memberId]);requireThat(m.rows[0]?.auth_user_id===data.user.id,'UNAUTHENTICATED','인증 정보가 일치하지 않습니다.',401);}
- const db=await pool().connect();try{return {session,me:await actor(db,session,new Date(),allowPending)};}finally{db.release();}
+ const db=await pool().connect();try{const me=await actor(db,session,new Date(),allowPending);requireThat(!context||(context==='admin'?me.role==='ADMIN':me.role==='STUDENT'),'UNAUTHENTICATED','해당 화면에서 다시 로그인해 주세요.',401);return {session,me};}finally{db.release();}
 }
 const limits=globalThis as unknown as {bookingAuthLimits?:Map<string,{until:number;count:number}>};
 export function rateLimit(key:string,max=10){const map=limits.bookingAuthLimits??=new Map();const now=Date.now();for(const [k,v]of map)if(v.until<now)map.delete(k);const v=map.get(key)??{until:now+600000,count:0};v.count++;map.set(key,v);requireThat(v.count<=max,'RATE_LIMITED','요청이 많습니다. 10분 후 다시 시도해 주세요.',429);}

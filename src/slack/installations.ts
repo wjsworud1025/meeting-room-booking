@@ -1,5 +1,6 @@
+import {inWorkspace} from '../server/saas/slack-routing';
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
-import {pool} from '../server/db';
+import {pool,saasEnabled} from '../server/db';
 import {requireThat} from '../server/errors';
 import {assertConnectedWorkspace} from './workspaces';
 
@@ -26,7 +27,8 @@ export async function saveInstallation(installation:{team:string;name:string;app
  await pool().query(`INSERT INTO slack_installations(team_id,team_name,app_id,bot_user_id,bot_token_encrypted)
  VALUES($1,$2,$3,$4,$5) ON CONFLICT(team_id) DO UPDATE SET team_name=$2,app_id=$3,bot_user_id=$4,bot_token_encrypted=$5,installed_at=clock_timestamp(),revoked_at=NULL`,[team,name,appId,botUserId,encryptToken(token,team)]);
 }
-export async function workspaceAuthorization(team:string){
+export async function workspaceAuthorization(team:string){return inWorkspace(team,()=>authorization(team));}
+async function authorization(team:string){
  await assertConnectedWorkspace(team);
  const row=(await pool().query('SELECT bot_token_encrypted,bot_user_id,revoked_at FROM slack_installations WHERE team_id=$1',[team])).rows[0];
  if(row){
@@ -34,7 +36,7 @@ export async function workspaceAuthorization(team:string){
   return {teamId:team,botToken:decryptToken(row.bot_token_encrypted,team),botUserId:row.bot_user_id as string};
  }
  // Preserve the existing single-workspace deployment during migration.
- requireThat(team===process.env.SLACK_WORKSPACE_ID&&!!process.env.SLACK_BOT_TOKEN,'WORKSPACE_DENIED','설치된 워크스페이스가 아닙니다.',403);
+ requireThat(!saasEnabled()&&team===process.env.SLACK_WORKSPACE_ID&&!!process.env.SLACK_BOT_TOKEN,'WORKSPACE_DENIED','설치된 워크스페이스가 아닙니다.',403);
  return {teamId:team,botToken:process.env.SLACK_BOT_TOKEN!,botUserId:process.env.SLACK_BOT_USER_ID};
 }
 export async function revokeInstallation(team:string){

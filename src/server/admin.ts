@@ -1,3 +1,4 @@
+import {saasEnabled} from './db';
 import {installRequestCommand} from './class-install';
 import {requireVenue} from './venues';
 import {randomUUID} from 'node:crypto';
@@ -17,7 +18,7 @@ export async function issueAdmin(db:DB,args:{email:string;name:string;reason:str
  const found=(await db.query<Member>('SELECT * FROM members WHERE email=$1',[args.email])).rows[0];requireThat(!found||found.role==='ADMIN','ADMIN_EMAIL_CONFLICT','학생 계정과 다른 이메일을 사용해 주세요.');requireThat(found?.status!=='ACTIVE','ADMIN_EMAIL_CONFLICT','이미 활성 관리자입니다.');
 
  const id=found?.id??randomUUID(),inviteId=randomUUID();
- await db.query(`INSERT INTO members(id,email,display_name,role,status,admin_invite_id,issuer_type,invited_by,invite_expires_at) VALUES($1,$2,$3,'ADMIN','REGISTERED',$4,$5,$6,$7) ON CONFLICT(email) DO UPDATE SET admin_invite_id=$4,issuer_type=$5,invited_by=$6,invite_expires_at=$7,invite_accepted_at=NULL,invite_revoked_at=NULL,account_version=members.account_version+1,updated_at=$8`,[id,args.email,args.name,inviteId,args.issuer,args.by,new Date(now.getTime()+86400000),now]);
+ await db.query(`INSERT INTO members(id,email,display_name,role,status,admin_invite_id,issuer_type,invited_by,invite_expires_at) VALUES($1,$2,$3,'ADMIN','REGISTERED',$4,$5,$6,$7) ON CONFLICT(${saasEnabled()?'tenant_id,':''}email) DO UPDATE SET admin_invite_id=$4,issuer_type=$5,invited_by=$6,invite_expires_at=$7,invite_accepted_at=NULL,invite_revoked_at=NULL,account_version=members.account_version+1,updated_at=$8`,[id,args.email,args.name,inviteId,args.issuer,args.by,new Date(now.getTime()+86400000),now]);
  await queue(db,'MEMBER_PROVISION',`provision:${id}:${inviteId}`,{memberId:id,role:'ADMIN',invitationId:inviteId});await queue(db,'NOTIFY',`admin-invite:${inviteId}`,{event:'관리자 초대',invitationId:inviteId},id,'EMAIL');return {id,invitationId:inviteId};
 }
 async function adminNotice(db:DB,id:string,event:string,now:Date){const others=await db.query("SELECT id FROM members WHERE role='ADMIN' AND status='ACTIVE' UNION SELECT id FROM members WHERE id=$1",[id]);await queue(db,'NOTIFY',`admin-home:${id}:${now.toISOString()}`,{event},id,'SLACK_HOME');for(const r of others.rows)await queue(db,'NOTIFY',`admin:${id}:${event}:${now.toISOString()}:${r.id}`,{event},r.id,'AUTO');}
@@ -32,6 +33,15 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
  admin(me,session,now,action.startsWith('account.'));
  requireThat(!action.startsWith('account.'),'SINGLE_ADMIN_ONLY','단일 관리자 운영으로 관리자 추가·초대·권한 변경을 지원하지 않습니다.',403);
  if(action.startsWith('classInstall.'))return installRequestCommand(db,action.slice(13),input,now);
+
+ if(action==='venue.remove'){
+  const v=z.object({id:uuid,reason}).strict().parse(input);
+  requireThat((await db.query('SELECT id FROM venues WHERE id=$1 FOR UPDATE',[v.id])).rowCount,'NOT_FOUND','수업장을 찾을 수 없습니다.',404);
+  await db.query('UPDATE rooms SET venue_id=NULL WHERE venue_id=$1 AND NOT active AND NOT EXISTS(SELECT 1 FROM reservations r WHERE r.room_id=rooms.id)',[v.id]);
+  const linked=(await db.query('SELECT EXISTS(SELECT 1 FROM rooms WHERE venue_id=$1) rooms,EXISTS(SELECT 1 FROM cohorts WHERE venue_id=$1) classes,EXISTS(SELECT 1 FROM class_install_requests WHERE venue_id=$1) requests',[v.id])).rows[0];
+  requireThat(!linked.rooms&&!linked.classes&&!linked.requests,'CONFLICT','연결된 회의실·클래스 또는 설치 요청이 있습니다. 수업장을 변경하거나 설치 요청을 삭제한 후 다시 시도해 주세요.');
+  await db.query('DELETE FROM venues WHERE id=$1',[v.id]);return {id:v.id};
+ }
  if(action==='venue.add'||action==='venue.rename'){
   const v=z.object({id:uuid.optional(),name,reason}).strict().parse(input);
   requireThat(!(await db.query('SELECT 1 FROM venues WHERE name=$1 AND ($2::uuid IS NULL OR id<>$2)',[v.name,v.id??null])).rowCount,'CONFLICT','같은 이름의 수업장이 있습니다.');
@@ -67,10 +77,11 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
   return adminCommand(db,me,session,'cohort.end',{id:v.cohortId,reason:v.reason},now);
  }
  if(action==='student.register'){
+  requireThat(!saasEnabled(),'SLACK_MEMBERSHIP_REQUIRED','구성원은 연결된 Slack 워크스페이스에서 자동 등록됩니다.',409);
   const v=z.object({students:z.array(z.object({name,email,className:z.string().trim().max(80).default('')}).strict()).min(1).max(200),cohortId:uuid,reason}).strict().parse(input);
   requireThat((await db.query('SELECT 1 FROM cohorts WHERE id=$1 AND inactive_at IS NULL',[v.cohortId])).rowCount,'INVALID_INPUT','활성 기수를 선택해 주세요.',422);requireThat(new Set(v.students.map(s=>s.email)).size===v.students.length,'INVALID_INPUT','중복 이메일이 있습니다.',422);const ids:string[]=[];
   for(const s of v.students){const old=(await db.query<Member>('SELECT * FROM members WHERE email=$1',[s.email])).rows[0];requireThat(!old||old.role==='STUDENT','ADMIN_EMAIL_CONFLICT','관리자 이메일은 학생 명단에 등록할 수 없습니다.');requireThat(!old||old.status==='INACTIVE','EMAIL_CONFLICT',`${s.name}: 이미 등록된 계정입니다.`);
-   const id=old?.id??randomUUID();await db.query("INSERT INTO members(id,email,display_name,class_name,cohort_id,role,status) VALUES($1,$2,$3,$4,$5,'STUDENT','REGISTERED') ON CONFLICT(email) DO UPDATE SET display_name=$3,class_name=$4,cohort_id=$5,status='REGISTERED',access_version=members.access_version+1,account_version=members.account_version+1,updated_at=$6,inactive_at=NULL,slack_user_id=NULL,slack_workspace_id=NULL",[id,s.email,s.name,s.className,v.cohortId,now]);await queue(db,'MEMBER_PROVISION',`student-provision:${id}:${now.toISOString()}`,{memberId:id,role:'STUDENT'});ids.push(id);
+   const id=old?.id??randomUUID();await db.query(`INSERT INTO members(id,email,display_name,class_name,cohort_id,role,status) VALUES($1,$2,$3,$4,$5,'STUDENT','REGISTERED') ON CONFLICT(${saasEnabled()?'tenant_id,':''}email) DO UPDATE SET display_name=$3,class_name=$4,cohort_id=$5,status='REGISTERED',access_version=members.access_version+1,account_version=members.account_version+1,updated_at=$6,inactive_at=NULL,slack_user_id=NULL,slack_workspace_id=NULL`,[id,s.email,s.name,s.className,v.cohortId,now]);await queue(db,'MEMBER_PROVISION',`student-provision:${id}:${now.toISOString()}`,{memberId:id,role:'STUDENT'});ids.push(id);
   }return {ids};
  }
  if(action==='student.deactivate'){
@@ -121,10 +132,43 @@ export async function adminCommand(db:DB,me:Member,session:Session,action:string
   requireThat(!count,'ROOM_HAS_RESERVATIONS',`진행 중이거나 예정된 예약이 ${count}건 있습니다. 예약을 이동하거나 취소한 후 제거해 주세요.`);
   const changed=await db.query('UPDATE rooms SET active=false WHERE id=$1 AND active',[v.id]);requireThat(changed.rowCount,'ROOM_UNAVAILABLE','이미 제거된 회의실입니다.');return {id:v.id};
  }
+ if(action==='policy.remove'){
+  const v=z.object({id:uuid,venueId:uuid,reason:z.string().max(500).optional()}).strict().parse(input);
+  await db.query("SELECT pg_advisory_xact_lock(hashtext(COALESCE(current_setting('app.tenant_id',true),'legacy')||':policy'))");
+  await requireVenue(db,v.venueId);
+  const row=(await db.query('SELECT * FROM policy_versions WHERE id=$1 FOR UPDATE',[v.id])).rows[0];
+  requireThat(row,'POLICY_NOT_FOUND','이미 삭제된 정책입니다.',404);
+  requireThat(row.effective_on>localDate(now),'POLICY_IN_USE','현재 적용 중이거나 과거에 적용된 정책은 삭제할 수 없습니다.');
+  requireThat(row.rules_json.venuePolicies?.[v.venueId],'POLICY_SHARED','공통 기본 정책은 이 수업장에서 삭제할 수 없습니다.');
+  const used=(await db.query('SELECT 1 FROM reservations WHERE policy_version_id=$1 LIMIT 1',[v.id])).rowCount;
+  requireThat(!used,'POLICY_IN_USE','예약에 사용된 정책은 삭제할 수 없습니다.');
+  const remaining={...row.rules_json.venuePolicies};delete remaining[v.venueId];
+  if(row.rules_json.venueOnly&&!Object.keys(remaining).length)await db.query('DELETE FROM policy_versions WHERE id=$1',[v.id]);
+  else await db.query("UPDATE policy_versions SET rules_json=jsonb_set(rules_json,'{venuePolicies}',$2::jsonb) WHERE id=$1",[v.id,JSON.stringify(remaining)]);
+  return {id:v.id,venueId:v.venueId};
+ }
  if(action==='policy'){
   const roomRule=z.object({capacity:z.number().int().min(2).max(100),minimum:z.number().int().min(2).max(100)}).refine(x=>x.minimum<=x.capacity);
   const rules=z.object({windowDays:z.number().int().min(1).max(30),slotMinutes:z.number().int().min(5).max(60),maxMinutes:z.number().int().min(30).max(720),holdMinutes:z.number().int().min(1).max(60),refillMinutes:z.number().int().min(1).max(60),cooldownMinutes:z.number().int().min(1).max(60),gapMinutes:z.number().int().min(1).max(1440),threshold:z.number().min(0).max(99),open:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),close:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),weekdays:z.array(z.number().int().min(0).max(6)).min(1),rooms:z.record(uuid,roomRule)}).strict();
-  const v=z.object({effectiveOn:z.iso.date(),rules,reason}).strict().parse(input),current=await policy(db,localDate(now));requireThat(v.effectiveOn>=addDays(localDate(now),current.rules_json.windowDays+1),'INVALID_POLICY_DATE','현재 열린 예약 기간 이후 날짜를 선택해 주세요.');requireThat(v.rules.open<v.rules.close&&v.rules.maxMinutes%v.rules.slotMinutes===0,'INVALID_INPUT','시간 정책의 단위와 범위를 확인해 주세요.',422);const roomIds=(await db.query('SELECT id FROM rooms WHERE active')).rows.map(x=>x.id);requireThat(roomIds.every(id=>v.rules.rooms[id]),'INVALID_INPUT','모든 회의실의 정원 정책이 필요합니다.',422);const id=randomUUID();await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify(v.rules),me.id]);return {id};
+
+  const v=z.object({venueId:uuid.optional(),effectiveOn:z.iso.date(),rules,reason:z.string().trim().max(500).optional().default('')}).strict().parse(input);
+  await db.query("SELECT pg_advisory_xact_lock(hashtext(COALESCE(current_setting('app.tenant_id',true),'legacy')||':policy'))");
+  if(v.venueId){await requireVenue(db,v.venueId);await db.query('SELECT id FROM venues WHERE id=$1 FOR UPDATE',[v.venueId]);}
+  const current=await policy(db,localDate(now),v.venueId);
+  requireThat(v.effectiveOn>=addDays(localDate(now),current.rules_json.windowDays+1),'INVALID_POLICY_DATE','현재 열린 예약 기간 이후 날짜를 선택해 주세요.');
+  requireThat(v.rules.open<v.rules.close&&v.rules.maxMinutes%v.rules.slotMinutes===0,'INVALID_INPUT','시간 정책의 단위와 범위를 확인해 주세요.',422);
+  const roomIds=(await db.query('SELECT id FROM rooms WHERE active AND ($1::uuid IS NULL OR venue_id=$1)',[v.venueId??null])).rows.map(x=>x.id);
+  requireThat(roomIds.every(id=>v.rules.rooms[id])&&Object.keys(v.rules.rooms).every(id=>roomIds.includes(id)),'INVALID_INPUT','선택한 수업장의 회의실 정원 정책만 지정해 주세요.',422);
+  const id=randomUUID();
+  if(v.venueId){
+   const existing=(await db.query('SELECT id,rules_json FROM policy_versions WHERE effective_on=$1 FOR UPDATE',[v.effectiveOn])).rows[0];
+   requireThat(!existing?.rules_json.venuePolicies?.[v.venueId],'CONFLICT','이 수업장의 해당 적용일 정책이 이미 있습니다.');
+   if(existing){await db.query("UPDATE policy_versions SET rules_json=jsonb_set(rules_json,'{venuePolicies}',COALESCE(rules_json->'venuePolicies','{}'::jsonb)||$2::jsonb) WHERE id=$1",[existing.id,JSON.stringify({[v.venueId]:v.rules})]);return {id:existing.id};}
+   const base=await policy(db,v.effectiveOn);
+   await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify({...base.rules_json,venueOnly:true,venuePolicies:{[v.venueId]:v.rules}}),me.id]);
+  }else await db.query('INSERT INTO policy_versions(id,effective_on,rules_json,created_by) VALUES($1,$2,$3,$4)',[id,v.effectiveOn,JSON.stringify(v.rules),me.id]);
+  return {id};
+
  }
  if(action==='report.resolve'){const v=z.object({id:uuid,resolution:reason}).strict().parse(input);const result=await db.query("UPDATE reports SET status='RESOLVED',resolution=$2,resolved_by=$3 WHERE id=$1 AND status='OPEN' RETURNING reporter_id",[v.id,v.resolution,me.id]);requireThat(result.rowCount,'STALE_VERSION','이미 처리된 신고입니다.');await queue(db,'NOTIFY',`report:${v.id}`,{event:'신고 처리 완료'},result.rows[0].reporter_id,'AUTO');return {id:v.id};}
  if(action==='sanction'){

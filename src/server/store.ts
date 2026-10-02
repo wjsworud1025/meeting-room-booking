@@ -1,3 +1,4 @@
+import {saasEnabled} from './db';
 import type {DB} from './db';
 import type {Member,Reservation,Rules,Session} from '../shared/types';
 import {requireThat} from './errors';
@@ -19,7 +20,14 @@ export async function student(db:DB,m:Member,now:Date){
  const restricted=await db.query("SELECT 1 FROM sanctions WHERE member_id=$1 AND kind='RESTRICTED' AND revoked_at IS NULL AND starts_at<=$2 AND ends_at>$2",[m.id,now]);
  requireThat(!restricted.rowCount,'MEMBER_RESTRICTED','이용 제한 기간입니다. 운영 담당자에게 문의해 주세요.');
 }
-export async function policy(db:DB,date:string){const r=await db.query<{id:string;rules_json:Rules;effective_on:string}>('SELECT * FROM policy_versions WHERE effective_on<=$1 ORDER BY effective_on DESC LIMIT 1',[date]);requireThat(r.rows[0],'POLICY_MISSING','운영 정책이 등록되지 않았습니다.',503);return r.rows[0];}
+export async function policy(db:DB,date:string,venueId?:string|null){
+ const rows=(await db.query<{id:string;rules_json:Rules;effective_on:string}>('SELECT * FROM policy_versions WHERE effective_on<=$1 ORDER BY effective_on DESC',[date])).rows;
+ const scoped=venueId?rows.find(p=>p.rules_json.venuePolicies?.[venueId]):undefined;
+ if(scoped)return {...scoped,rules_json:{...scoped.rules_json.venuePolicies![venueId!],rooms:{...scoped.rules_json.rooms,...scoped.rules_json.venuePolicies![venueId!].rooms}} as Rules};
+ const base=rows.find(p=>!p.rules_json.venueOnly);requireThat(base,'POLICY_MISSING','운영 정책이 등록되지 않았습니다.',503);const {venueOnly,venuePolicies,...rules}=base.rules_json;return {...base,rules_json:rules};
+}
+export async function roomPolicy(db:DB,date:string,roomId:string){const room=(await db.query('SELECT venue_id FROM rooms WHERE id=$1',[roomId])).rows[0];return policy(db,date,room?.venue_id);}
+
 export async function reservations(db:DB,where='TRUE',params:unknown[]=[]):Promise<Reservation[]>{
  const result=await db.query(`SELECT r.*,m.display_name organizer_name,
  COALESCE(jsonb_agg(jsonb_build_object('id',p.id,'member_id',p.member_id,'display_name',u.display_name,'status',p.status,'invited_by',p.invited_by,'invitation_generation',p.invitation_generation)) FILTER(WHERE p.id IS NOT NULL),'[]'::jsonb) participants,
@@ -33,7 +41,7 @@ export async function audit(db:DB,actorId:string|null,action:string,id:string|nu
  await db.query('INSERT INTO audit_events(actor_id,action,entity_type,entity_id,reason,decided_at,request_id,after_summary,cohort_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[actorId,action,action.split('.')[0],id,reason,now,requestId,JSON.stringify(after),cohortId]);
 }
 export async function queue(db:DB,kind:string,key:string,payload:unknown,recipient:string|null=null,channel:string|null=null){
- await db.query('INSERT INTO tasks(kind,dedupe_key,payload,recipient_id,channel) VALUES($1,$2,$3,$4,$5) ON CONFLICT(dedupe_key) DO NOTHING',[kind,key,JSON.stringify(payload),recipient,channel]);
+ await db.query(`INSERT INTO tasks(kind,dedupe_key,payload,recipient_id,channel) VALUES($1,$2,$3,$4,$5) ON CONFLICT(${saasEnabled()?'tenant_id,':''}dedupe_key) DO NOTHING`,[kind,key,JSON.stringify(payload),recipient,channel]);
 }
 export async function notifyReservation(db:DB,r:Reservation,event:string){
  for(const p of r.participants.filter(p=>['ACCEPTED','INVITED'].includes(p.status))){

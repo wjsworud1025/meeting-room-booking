@@ -1,6 +1,6 @@
 {
   "name": "meeting-room-booking",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -29,12 +29,25 @@
     "dev:lan": "node scripts/dev-lan.cjs",
     "dev:slack-app": "tsx --env-file=.env.slack-app.local src/slack/app.ts",
     "dev:slack-install": "tsx --env-file=.env.slack-install.local scripts/slack-install-server.ts",
-    "slack:prepare-class": "tsx --env-file=.env.local scripts/slack-prepare-class.ts"
+    "slack:prepare-class": "tsx --env-file=.env.local scripts/slack-prepare-class.ts",
+    "saas:preflight": "tsx --env-file=.env.local scripts/saas/check.ts preflight",
+    "saas:dry-run": "tsx --env-file=.env.local scripts/saas/check.ts dry-run",
+    "test:saas": "tsx --env-file=.env.local tests/saas-isolation.ts",
+    "test:accounts": "tsx --env-file=.env.local tests/login-accounts-integration.ts",
+    "account:bootstrap": "tsx --env-file=.env.local scripts/saas/bootstrap-login.ts",
+    "test:saas:web": "tsx --env-file=.env.local tests/saas-web-integration.ts",
+    "saas:staging:prepare": "tsx --env-file=.env.local scripts/saas/prepare-staging.ts",
+    "saas:staging:start": "node --env-file=.env.saas-staging.local scripts/saas/start-staging.mjs",
+    "saas:rehearse:recovery": "tsx --env-file=.env.local scripts/saas/rehearse-recovery.ts",
+    "saas:runtime:check": "tsx scripts/saas/start-production.ts --check",
+    "saas:start": "tsx scripts/saas/start-production.ts",
+    "saas:staging:upgrade": "tsx scripts/saas/upgrade-staging.ts"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@supabase/supabase-js": "2.117.2",
     "fast-xml-parser": "5.11.1",
+    "fflate": "^0.8.2",
     "lucide-react": "^0.577.0",
     "next": "16.3.6",
     "nodemailer": "10.0.12",
